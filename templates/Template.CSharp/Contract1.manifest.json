@@ -1,0 +1,25 @@
+{"groups":[],"features":{"storage":false,"payable":false},"abi":{
+    "hash":"0xf0532ef2ec1491346eaba1bb9006e27eb0067775",
+    "methods":
+    [
+    ],
+    "entryPoint":
+    {
+        "name":"main",
+        "parameters":
+        [
+            {
+                "name":"operation",
+                "type":"String"
+            },
+            {
+                "name":"args",
+                "type":"Array"
+            }
+        ],
+        "returnType":"ByteArray"
+    },
+    "events":
+    [
+    ]
+},"permissions":[{"contract":"*","methods":"*"}],"trusts":[],"safeMethods":[]}
