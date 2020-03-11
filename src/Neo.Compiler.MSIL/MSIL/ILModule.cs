@@ -20,12 +20,14 @@ namespace Neo.Compiler.MSIL
         public void LoadModule(System.IO.Stream dllStream, System.IO.Stream pdbStream)
         {
             this.module = Mono.Cecil.ModuleDefinition.ReadModule(dllStream);
+            //#if WITHPDB
             if (pdbStream != null)
             {
                 var debugInfoLoader = new Mono.Cecil.Pdb.PdbReaderProvider();
 
                 module.ReadSymbols(debugInfoLoader.GetSymbolReader(module, pdbStream));
             }
+            //#endif
             if (module.HasAssemblyReferences)
             {
                 foreach (var ar in module.AssemblyReferences)
@@ -50,26 +52,22 @@ namespace Neo.Compiler.MSIL
                         foreach (var nt in t.NestedTypes)
                         {
                             mapType[nt.FullName] = new ILType(this, nt, logger);
+
                         }
                     }
+
                 }
             }
         }
-    }
 
+    }
     public class ILType
     {
         public Dictionary<string, ILField> fields = new Dictionary<string, ILField>();
         public Dictionary<string, ILMethod> methods = new Dictionary<string, ILMethod>();
-        public List<Mono.Cecil.CustomAttribute> attributes = new List<Mono.Cecil.CustomAttribute>();
 
         public ILType(ILModule module, Mono.Cecil.TypeDefinition type, ILogger logger)
         {
-            if (type.HasCustomAttributes && type.IsClass)
-            {
-                attributes.AddRange(type.CustomAttributes);
-            }
-
             foreach (Mono.Cecil.FieldDefinition f in type.Fields)
             {
                 this.fields.Add(f.Name, new ILField(this, f));
@@ -93,18 +91,11 @@ namespace Neo.Compiler.MSIL
                 }
             }
         }
+
     }
 
     public class ILField
     {
-        public bool isEvent = false;
-        public string type;
-        public string name;
-        public string displayName;
-        public string returntype;
-        public List<NeoParam> paramtypes = new List<NeoParam>();
-        public Mono.Cecil.FieldDefinition field;
-
         public ILField(ILType type, Mono.Cecil.FieldDefinition field)
         {
             this.type = field.FieldType.FullName;
@@ -182,6 +173,7 @@ namespace Neo.Compiler.MSIL
                                         }
                                     }
                                     this.paramtypes.Add(new NeoParam(src.Name, paramtype));
+
                                 }
                             }
                         }
@@ -190,29 +182,24 @@ namespace Neo.Compiler.MSIL
                 }
             }
         }
-
+        public bool isEvent = false;
+        public string type;
+        public string name;
+        public string displayName;
+        public string returntype;
+        public List<NeoParam> paramtypes = new List<NeoParam>();
         public override string ToString()
         {
             return type;
         }
+        public Mono.Cecil.FieldDefinition field;
     }
 
     public class ILMethod
     {
-        public ILType type = null;
-        public Mono.Cecil.MethodDefinition method;
-        public string returntype;
-        public List<NeoParam> paramtypes = new List<NeoParam>();
-        public bool hasParam = false;
-        public List<NeoParam> body_Variables = new List<NeoParam>();
-        public SortedDictionary<int, OpCode> body_Codes = new SortedDictionary<int, OpCode>();
-        public string fail = null;
-
         public ILMethod(ILType type, Mono.Cecil.MethodDefinition method, ILogger logger = null)
         {
-            this.type = type;
             this.method = method;
-
             if (method != null)
             {
                 returntype = method.ReturnType.FullName;
@@ -246,7 +233,9 @@ namespace Neo.Compiler.MSIL
                     {
                         foreach (var v in bodyNative.Variables)
                         {
-                            var indexname = v.VariableType.Name + ":" + v.Index;
+                            var indexname = method.DebugInformation.TryGetName(v, out var varname)
+                                ? varname
+                                : v.VariableType.Name + ":" + v.Index;
                             this.body_Variables.Add(new NeoParam(indexname, v.VariableType.FullName));
                         }
                     }
@@ -260,10 +249,11 @@ namespace Neo.Compiler.MSIL
                         };
 
                         var sp = method.DebugInformation.GetSequencePoint(code);
-                        if (sp != null)
+                        if (sp != null && !sp.IsHidden)
                         {
                             c.debugcode = sp.Document.Url;
                             c.debugline = sp.StartLine;
+                            c.sequencePoint = sp;
                         }
                         c.InitToken(code.Operand);
                         this.body_Codes.Add(c.addr, c);
@@ -271,6 +261,15 @@ namespace Neo.Compiler.MSIL
                 }
             }
         }
+
+        public string returntype;
+        public List<NeoParam> paramtypes = new List<NeoParam>();
+        public bool hasParam = false;
+        public Mono.Cecil.MethodDefinition method;
+        public List<NeoParam> body_Variables = new List<NeoParam>();
+        public SortedDictionary<int, OpCode> body_Codes = new SortedDictionary<int, OpCode>();
+        public string fail = null;
+
         public int GetLastCodeAddr(int srcaddr)
         {
             int last = -1;
@@ -283,6 +282,7 @@ namespace Neo.Compiler.MSIL
             }
             return last;
         }
+
         public int GetNextCodeAddr(int srcaddr)
         {
             bool bskip = false;
@@ -528,24 +528,6 @@ namespace Neo.Compiler.MSIL
 
     public class OpCode
     {
-        public TokenValueType tokenValueType = TokenValueType.Nothing;
-        public int addr;
-        public CodeEx code;
-        public int debugline = -1;
-        public string debugcode;
-        public object tokenUnknown;
-        public int tokenAddr_Index;
-        //public int tokenAddr;
-        public int[] tokenAddr_Switch;
-        public string tokenType;
-        public string tokenField;
-        public string tokenMethod;
-        public int tokenI32;
-        public Int64 tokenI64;
-        public float tokenR32;
-        public double tokenR64;
-        public string tokenStr;
-
         public override string ToString()
         {
             var info = "IL_" + addr.ToString("X04") + " " + code + " ";
@@ -560,7 +542,6 @@ namespace Neo.Compiler.MSIL
             }
             return info;
         }
-
         public enum TokenValueType
         {
             Nothing,
@@ -574,7 +555,24 @@ namespace Neo.Compiler.MSIL
             I64,
             OTher,
         }
-
+        public TokenValueType tokenValueType = TokenValueType.Nothing;
+        public int addr;
+        public CodeEx code;
+        public int debugline = -1;
+        public string debugcode;
+        public Mono.Cecil.Cil.SequencePoint sequencePoint;
+        public object tokenUnknown;
+        public int tokenAddr_Index;
+        //public int tokenAddr;
+        public int[] tokenAddr_Switch;
+        public string tokenType;
+        public string tokenField;
+        public string tokenMethod;
+        public int tokenI32;
+        public Int64 tokenI64;
+        public float tokenR32;
+        public double tokenR64;
+        public string tokenStr;
         public void InitToken(object _p)
         {
             this.tokenUnknown = _p;
@@ -715,30 +713,33 @@ namespace Neo.Compiler.MSIL
                 case CodeEx.Stloc_S:
                     this.tokenI32 = ((Mono.Cecil.Cil.VariableDefinition)_p).Index;
                     this.tokenValueType = TokenValueType.I32;
-
                     //this.tokenUnknown = _p;
                     break;
+
                 case CodeEx.Ldloc:
                 case CodeEx.Stloc:
                     this.tokenI32 = (int)_p;
                     this.tokenValueType = TokenValueType.I32;
                     break;
+
                 case CodeEx.Stloc_0:
                 case CodeEx.Ldloc_0:
                     this.tokenI32 = 0;
                     this.tokenValueType = TokenValueType.I32;
-
                     break;
+
                 case CodeEx.Stloc_1:
                 case CodeEx.Ldloc_1:
                     this.tokenI32 = 1;
                     this.tokenValueType = TokenValueType.I32;
                     break;
+
                 case CodeEx.Stloc_2:
                 case CodeEx.Ldloc_2:
                     this.tokenI32 = 2;
                     this.tokenValueType = TokenValueType.I32;
                     break;
+
                 case CodeEx.Stloc_3:
                 case CodeEx.Ldloc_3:
                     this.tokenI32 = 3;

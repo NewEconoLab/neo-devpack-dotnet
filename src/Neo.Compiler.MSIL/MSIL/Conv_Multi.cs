@@ -1,4 +1,3 @@
-using Neo.SmartContract;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -13,26 +12,65 @@ namespace Neo.Compiler.MSIL
     {
         private void _ConvertStLoc(ILMethod method, OpCode src, NeoMethod to, int pos)
         {
-            if (pos < 7)
-            {
-                _Convert1by1(VM.OpCode.STLOC0 + (byte)pos, src, to);
-            }
-            else
-            {
-                _Convert1by1(VM.OpCode.STLOC, src, to, new byte[] { (byte)pos });
-            }
+
+            //get array
+            //_Convert1by1(VM.OpCode.FROMALTSTACK, src, to);
+            //_Convert1by1(VM.OpCode.DUP, null, to);
+            //_Convert1by1(VM.OpCode.TOALTSTACK, null, to);
+            _Convert1by1(VM.OpCode.DUPFROMALTSTACK, src, to);
+
+            //get i
+            _ConvertPush(pos + method.paramtypes.Count, null, to);//翻转取参数顺序
+
+            //getitem
+            _ConvertPush(2, null, to);
+            _Convert1by1(VM.OpCode.ROLL, null, to);
+
+            _Convert1by1(VM.OpCode.SETITEM, null, to);
+
+
+            //_Convert1by1(VM.OpCode.CLONESTRUCTONLY, src, to);
+            ////push d
+            //var c = _Convert1by1(VM.OpCode.DEPTH, null, to);
+            //if (c.debugcode == null)
+            //{
+            //    c.debugcode = "from StLoc -> 6 code";
+            //    c.debugline = 0;
+            //}
+
+
+            ////_Convert1by1(VM.ScriptOp.OP_DUP, src, to);
+            ////push n
+            //_ConvertPush(pos, null, to);
+            ////d-n-1
+            //_Convert1by1(VM.OpCode.SUB, null, to);
+            //_Convert1by1(VM.OpCode.DEC, null, to);
+
+            ////push olddepth
+            //_Convert1by1(VM.OpCode.FROMALTSTACK, null, to);
+            //_Convert1by1(VM.OpCode.DUP, null, to);
+            //_Convert1by1(VM.OpCode.TOALTSTACK, null, to);
+            ////(d-n-1)-olddepth
+            //_Convert1by1(VM.OpCode.SUB, null, to);
+
+            ////swap d-n-1 and top
+            //_Convert1by1(VM.OpCode.XSWAP, null, to);
+            ////drop top
+            //_Convert1by1(VM.OpCode.DROP, null, to);
+
         }
         private void _ConvertLdLoc(ILMethod method, OpCode src, NeoMethod to, int pos)
         {
+            //get array
+            //_Convert1by1(VM.OpCode.FROMALTSTACK, src, to);
+            //_Convert1by1(VM.OpCode.DUP, null, to);
+            //_Convert1by1(VM.OpCode.TOALTSTACK, null, to);
+            _Convert1by1(VM.OpCode.DUPFROMALTSTACK, src, to);
+            //get i
+            _ConvertPush(pos + method.paramtypes.Count, null, to);//翻转取参数顺序
+            _Convert1by1(VM.OpCode.PICKITEM, null, to);
 
-            if (pos < 7)
-            {
-                _Convert1by1(VM.OpCode.LDLOC0 + (byte)pos, src, to);
-            }
-            else
-            {
-                _Convert1by1(VM.OpCode.LDLOC, src, to, new byte[] { (byte)pos });
-            }
+
         }
         private void _ConvertLdLocA(ILMethod method, OpCode src, NeoMethod to, int pos)
         {//这有两种情况，我们需要先判断这个引用地址是拿出来干嘛的
@@ -41,13 +79,12 @@ namespace Neo.Compiler.MSIL
             var n2 = method.body_Codes[method.GetNextCodeAddr(n1.addr)];
             if (n1.code == CodeEx.Initobj)//初始化结构体，必须给引用地址
             {
-                //some initobj,need  setloc after initobj.save slot first.
-                ldloca_slot = pos;
+                _ConvertPush(pos + method.paramtypes.Count, src, to);
             }
             else if (n2.code == CodeEx.Call && n2.tokenMethod.Is_ctor())
             {
-                //some ctor,need  setloc after ctor.save slot first.
-                ldloca_slot = pos;
+                _ConvertPush(pos + method.paramtypes.Count, src, to);
+
             }
             else
             {
@@ -101,28 +138,51 @@ namespace Neo.Compiler.MSIL
             {
 
             }
-            if(pos<7)
-            {
-                _Convert1by1(VM.OpCode.LDARG0+(byte)pos, src, to);
-            }
-            else
-            {
-                _Convert1by1(VM.OpCode.LDARG, src, to,new byte[] { (byte)pos });
-            }
+            //}
+            //get array
+            //_Convert1by1(VM.OpCode.FROMALTSTACK, src, to);
+            //_Convert1by1(VM.OpCode.DUP, null, to);
+            //_Convert1by1(VM.OpCode.TOALTSTACK, null, to);
+            _Convert1by1(VM.OpCode.DUPFROMALTSTACK, src, to);
+            //get i
+            _ConvertPush(pos, null, to);//翻转取参数顺序
+            _Convert1by1(VM.OpCode.PICKITEM, null, to);
 
+            ////push d
+            //var c = _Convert1by1(VM.OpCode.DEPTH, src, to);
+            //if (c.debugcode == null)
+            //{
+            //    c.debugcode = "from LdArg -> 5 code";
+            //    c.debugline = 0;
+            //}
+            ////push n
+            //_ConvertPush(pos, null, to);//翻转取参数顺序
+            ////_Convert1by1(VM.OpCode.PUSHDATA1, null, to, int2Pushdata1bytes(to.paramtypes.Count - 1 - pos));
+            ////d+n
+            //_Convert1by1(VM.OpCode.ADD, null, to);
+
+            ////push olddepth
+            //_Convert1by1(VM.OpCode.FROMALTSTACK, null, to);
+            //_Convert1by1(VM.OpCode.DUP, null, to);
+            //_Convert1by1(VM.OpCode.TOALTSTACK, null, to);
+            ////(d+n)-olddepth
+            //_Convert1by1(VM.OpCode.SUB, null, to);
+
+            ////pick
+            //_Convert1by1(VM.OpCode.PICK, null, to);
         }
         private void _ConvertStArg(OpCode src, NeoMethod to, int pos)
         {
-            if (pos < 7)
-            {
-                _Convert1by1(VM.OpCode.STLOC0 + (byte)pos, src, to);
+            //get array
+            _Convert1by1(VM.OpCode.DUPFROMALTSTACK, src, to);
+            //set i
+            _ConvertPush(pos, null, to);//翻转取参数顺序
 
-            }
-            else
-            {
-                _Convert1by1(VM.OpCode.STLOC, src, to, new byte[] { (byte)pos });
+            //got v to top
+            _ConvertPush(2, null, to);
+            _Convert1by1(VM.OpCode.ROLL, null, to);
 
-            }
+            _Convert1by1(VM.OpCode.SETITEM, null, to);
         }
 
         /*
@@ -173,10 +233,13 @@ namespace Neo.Compiler.MSIL
 
                         try
                         {
-                            hash = hashstr.HexString2Bytes();
-                            if (hash.Length != 20)
-                                throw new Exception("Wrong hash:" + hashstr);
-
+                            hash = new byte[20];
+                            if (hashstr.Length < 40)
+                                throw new Exception("hash too short:" + hashstr);
+                            for (var i = 0; i < 20; i++)
+                            {
+                                hash[i] = byte.Parse(hashstr.Substring(i * 2, 2), System.Globalization.NumberStyles.HexNumber);
+                            }
                             //string hexhash 需要反序
                             hash = hash.Reverse().ToArray();
                             return true;
@@ -411,20 +474,17 @@ namespace Neo.Compiler.MSIL
             string[] calldata = null;
 
             Mono.Cecil.MethodDefinition defs = null;
-            Exception defError = null;
             try
             {
                 defs = refs.Resolve();
             }
-            catch (Exception err)
+            catch
             {
-                defError = err;
+
             }
 
             if (IsNonCall(defs))
             {
-                this.addrconv[src.addr] = addr;
-
                 return 0;
             }
             else if (IsNotifyCall(defs, refs, to, out callname))
@@ -645,14 +705,14 @@ namespace Neo.Compiler.MSIL
                 {
                     //各类<=指令
                     //有可能有一些会特殊处理，故还保留独立判断
-                    _Convert1by1(VM.OpCode.LE, src, to);
+                    _Convert1by1(VM.OpCode.LTE, src, to);
                     return 0;
                 }
                 else if (src.tokenMethod.Contains("::op_GreaterThanOrEqual("))
                 {
                     //各类>=指令
                     //有可能有一些会特殊处理，故还保留独立判断
-                    _Convert1by1(VM.OpCode.GE, src, to);
+                    _Convert1by1(VM.OpCode.GTE, src, to);
                     return 0;
                 }
                 else if (src.tokenMethod.Contains("::get_Length("))
@@ -696,19 +756,12 @@ namespace Neo.Compiler.MSIL
                 }
                 else if (src.tokenMethod == "System.Void System.Numerics.BigInteger::.ctor(System.Byte[])")
                 {
-                    //use slot set before by ldloca
-                    _ConvertStLoc(null, src, to, ldloca_slot);
-                    ldloca_slot = -1;
-                    return 0;
-                }
-                else if (src.tokenMethod.Contains("::op_LeftShift("))
-                {
-                    _Convert1by1(VM.OpCode.SHL, src, to);
-                    return 0;
-                }
-                else if (src.tokenMethod.Contains("::op_RightShift("))
-                {
-                    _Convert1by1(VM.OpCode.SHR, src, to);
+                    _Convert1by1(VM.OpCode.DUPFROMALTSTACK, src, to);
+                    _ConvertPush(2, null, to);
+                    _Convert1by1(VM.OpCode.ROLL, null, to);
+                    _ConvertPush(2, null, to);
+                    _Convert1by1(VM.OpCode.ROLL, null, to);
+                    _Convert1by1(VM.OpCode.SETITEM, null, to);
                     return 0;
                 }
                 else
@@ -719,15 +772,6 @@ namespace Neo.Compiler.MSIL
 
             if (calltype == 0)
             {
-                if (defs == null && defError != null)
-                {
-                    if (defError is Mono.Cecil.AssemblyResolutionException dllError)
-                    {
-                        logger.Log("<Error>Miss a Symbol in :" + dllError.AssemblyReference.FullName);
-                        logger.Log("<Error>Check DLLs for contract.");
-                    }
-                    throw defError;
-                }
                 //之前的所有尝试都无效，那也不一定是个不存在的函数，有可能在别的模块里
                 if (TryInsertMethod(outModule, defs))
                 {
@@ -774,23 +818,50 @@ namespace Neo.Compiler.MSIL
                 }
                 else if (pcount == 3)
                 {
-                    _Insert1(VM.OpCode.REVERSE3, "", to);
-                }
-                else if (pcount == 4)
-                {
-                    _Insert1(VM.OpCode.REVERSE4, "", to);
+                    _InsertPush(2, "swap 0 and 2 param", to);
+                    _Insert1(VM.OpCode.XSWAP, "", to);
                 }
                 else
                 {
-                    _InsertPush(pcount, "swap" + pcount, to);
-                    _Insert1(VM.OpCode.REVERSEN, "", to);
+                    for (var i = 0; i < pcount / 2; i++)
+                    {
+                        int saveto = (pcount - 1 - i);
+                        _InsertPush(saveto, "load" + saveto, to);
+                        _Insert1(VM.OpCode.PICK, "", to);
+
+                        _InsertPush(i + 1, "load" + i + 1, to);
+                        _Insert1(VM.OpCode.PICK, "", to);
+
+
+                        _InsertPush(saveto + 2, "save to" + saveto + 2, to);
+                        _Insert1(VM.OpCode.XSWAP, "", to);
+                        _Insert1(VM.OpCode.DROP, "", to);
+
+                        _InsertPush(i + 1, "save to" + i + 1, to);
+                        _Insert1(VM.OpCode.XSWAP, "", to);
+                        _Insert1(VM.OpCode.DROP, "", to);
+
+                    }
                 }
             }
             if (calltype == 1)
             {
-                var c = _Convert1by1(VM.OpCode.CALL_L, null, to, new byte[] { 5,0,0,0});
-                c.needfixfunc = true;
-                c.srcfunc = src.tokenMethod;
+                if (this.outModule.option.useNep8)
+                {
+                    byte _pcount = (byte)defs.Parameters.Count;
+                    byte _rvcount = (byte)(defs.ReturnType.FullName == "System.Void" ? 0 : 1);
+
+                    var c = _Convert1by1(VM.OpCode.CALL_I, null, to, new byte[] { _rvcount, _pcount, 0, 0 });
+                    c.needfixfunc = true;
+                    c.srcfunc = src.tokenMethod;
+
+                }
+                else
+                {
+                    var c = _Convert1by1(VM.OpCode.CALL, null, to, new byte[] { 5, 0 });
+                    c.needfixfunc = true;
+                    c.srcfunc = src.tokenMethod;
+                }
                 return 0;
             }
 
@@ -825,6 +896,7 @@ namespace Neo.Compiler.MSIL
             {
                 for (var j = 0; j < callcodes.Length; j++)
                 {
+
                     if (callcodes[j] == VM.OpCode.SYSCALL)
                     {
                         //if(isHex)
@@ -832,8 +904,20 @@ namespace Neo.Compiler.MSIL
                         //    throw new Exception("neomachine OpCodeAttribute field OpData currently supports SYSCALL only with plain non-empty text (not hex)!");
                         //}
 
-                        byte[] bytes = BitConverter.GetBytes(calldata[j].ToInteropMethodHash());
-                        _Convert1by1(VM.OpCode.SYSCALL, null, to, bytes);
+                        byte[] bytes = null;
+                        if (this.outModule.option.useSysCallInteropHash)
+                        {
+                            bytes = BitConverter.GetBytes(calldata[j].ToInteropMethodHash());
+                        }
+                        else
+                        {
+                            bytes = System.Text.Encoding.UTF8.GetBytes(calldata[j]);
+                            if (bytes.Length > 252) throw new Exception("string is to long");
+                        }
+                        byte[] outbytes = new byte[bytes.Length + 1];
+                        outbytes[0] = (byte)bytes.Length;
+                        Array.Copy(bytes, 0, outbytes, 1, bytes.Length);
+                        _Convert1by1(VM.OpCode.SYSCALL, null, to, outbytes);
                     }
                     else
                     {
@@ -846,8 +930,29 @@ namespace Neo.Compiler.MSIL
             }
             else if (calltype == 4)
             {
-                _ConvertPush(callhash, src, to);
-                _Insert1(VM.OpCode.SYSCALL, "", to, BitConverter.GetBytes(InteropService.Contract.Call));
+                if (this.outModule.option.useNep8)
+                {
+                    byte _pcount = (byte)defs.Parameters.Count;
+                    byte _rvcount = (byte)(defs.ReturnType.FullName == "System.Void" ? 0 : 1);
+
+
+                    if (callhash.All(v => v == 0))//empty nep4
+                    {
+                        throw new Exception("nep4 calltype==6");
+                    }
+                    else
+                    {
+                        var bytes = new byte[] { _rvcount, _pcount }.Concat(callhash).ToArray();
+                        _Convert1by1(VM.OpCode.CALL_E, null, to, bytes);
+
+                    }
+
+                }
+                else
+                {
+                    _Convert1by1(VM.OpCode.APPCALL, null, to, callhash);
+                }
+
             }
             else if (calltype == 5)
             {
@@ -862,19 +967,37 @@ namespace Neo.Compiler.MSIL
 
                 //a syscall
                 {
-                    var bytes = BitConverter.GetBytes(InteropService.Runtime.Notify);
-                    //byte[] outbytes = new byte[bytes.Length + 1];
-                    //outbytes[0] = (byte)bytes.Length;
-                    //Array.Copy(bytes, 0, outbytes, 1, bytes.Length);
+                    var bytes = Encoding.UTF8.GetBytes("Neo.Runtime.Notify");
+                    byte[] outbytes = new byte[bytes.Length + 1];
+                    outbytes[0] = (byte)bytes.Length;
+                    Array.Copy(bytes, 0, outbytes, 1, bytes.Length);
                     //bytes.Prepend 函数在 dotnet framework 4.6 编译不过
-                    _Convert1by1(VM.OpCode.SYSCALL, null, to, bytes);
+                    _Convert1by1(VM.OpCode.SYSCALL, null, to, outbytes);
                 }
             }
             else if (calltype == 6)
             {
                 _ConvertPush(callpcount, src, to);
                 _Convert1by1(VM.OpCode.ROLL, null, to);
-                _Convert1by1(VM.OpCode.SYSCALL, null, to, BitConverter.GetBytes(InteropService.Contract.Call));
+
+                //dyn appcall
+                if (this.outModule.option.useNep8)
+                {
+                    byte _pcount = (byte)defs.Parameters.Count;
+                    byte _rvcount = (byte)(defs.ReturnType.FullName == "System.Void" ? 0 : 1);
+                    //byte signature = (byte)(
+                    //    (retcount << 7)
+                    //    |
+                    //    defs.Parameters.Count
+                    //    );
+                    _Convert1by1(VM.OpCode.CALL_ED, null, to, new byte[] { _rvcount, _pcount });
+                }
+                else
+                {
+                    byte[] nullhash = new byte[20];
+                    _Convert1by1(VM.OpCode.APPCALL, null, to, nullhash);
+                }
+
             }
             return 0;
         }
@@ -1023,6 +1146,7 @@ namespace Neo.Compiler.MSIL
             //找到這個段落就ok，刪除跳轉表段落即可
             return skipcount;
         }
+
         private bool TryInsertMethod(NeoModule outModule, Mono.Cecil.MethodDefinition method)
         {
             var oldaddr = this.addr;
@@ -1041,6 +1165,7 @@ namespace Neo.Compiler.MSIL
             var _method = type.methods[method.FullName];
             try
             {
+                NeoMethod nm = new NeoMethod();
                 if (method.Is_cctor())
                 {
                     CctorSubVM.Parse(_method, this.outModule);
@@ -1052,10 +1177,22 @@ namespace Neo.Compiler.MSIL
                     return false;
                     //continue;
                 }
-
-                NeoMethod nm = new NeoMethod(_method);
+                nm._namespace = method.DeclaringType.FullName;
+                nm.name = method.FullName;
+                nm.displayName = method.Name;
+                Mono.Collections.Generic.Collection<Mono.Cecil.CustomAttribute> ca = method.CustomAttributes;
+                foreach (var attr in ca)
+                {
+                    if (attr.AttributeType.Name == "DisplayNameAttribute")
+                    {
+                        nm.displayName = (string)attr.ConstructorArguments[0].Value;
+                    }
+                }
+                nm.inSmartContract = method.DeclaringType.BaseType.Name == "SmartContract";
+                nm.isPublic = method.IsPublic;
                 this.methodLink[_method] = nm;
                 outModule.mapMethods[nm.name] = nm;
+
                 ConvertMethod(_method, nm);
                 return true;
             }
@@ -1074,40 +1211,6 @@ namespace Neo.Compiler.MSIL
                 }
             }
         }
-        private int _ConvertCgt(ILMethod method, OpCode src, NeoMethod to)
-        {
-            var code = to.body_Codes.Last().Value;
-            if (code.code == VM.OpCode.PUSHNULL)
-            {
-                //remove last code
-                to.body_Codes.Remove(code.addr);
-                this.addr = code.addr;
-                _Convert1by1(VM.OpCode.ISNULL, src, to);
-                _Convert1by1(VM.OpCode.NOT, src, to);
-            }
-            else
-            {
-                _Convert1by1(VM.OpCode.GT, src, to);
-            }
-            return 0;
-        }
-        private int _ConvertCeq(ILMethod method, OpCode src, NeoMethod to)
-        {
-            var code = to.body_Codes.Last().Value;
-            if (code.code == VM.OpCode.PUSHNULL)
-            {
-                //remove last code
-                to.body_Codes.Remove(code.addr);
-                this.addr = code.addr;
-                _Convert1by1(VM.OpCode.ISNULL, src, to);
-            }
-            else
-            {
-                _Convert1by1(VM.OpCode.NUMEQUAL, src, to);
-            }
-            return 0;
-        }
-
         private int _ConvertNewArr(ILMethod method, OpCode src, NeoMethod to)
         {
             var type = src.tokenType;
@@ -1128,54 +1231,6 @@ namespace Neo.Compiler.MSIL
                             _Convert1by1(VM.OpCode.DUP, null, to);
                             _ConvertPush(i / 2, null, to);
                             _ConvertPush(info, null, to);
-                            _Convert1by1(VM.OpCode.SETITEM, null, to);
-                        }
-                        return 3;
-                    }
-                    else if (type == "System.UInt32")
-                    {
-                        for (var i = 0; i < data.Length; i += 4)
-                        {
-                            var info = BitConverter.ToUInt32(data, i);
-                            _Convert1by1(VM.OpCode.DUP, null, to);
-                            _ConvertPush(i / 4, null, to);
-                            _ConvertPush(info, null, to);
-                            _Convert1by1(VM.OpCode.SETITEM, null, to);
-                        }
-                        return 3;
-                    }
-                    else if (type == "System.Int32")
-                    {
-                        for (var i = 0; i < data.Length; i += 4)
-                        {
-                            var info = BitConverter.ToInt32(data, i);
-                            _Convert1by1(VM.OpCode.DUP, null, to);
-                            _ConvertPush(i / 4, null, to);
-                            _ConvertPush(info, null, to);
-                            _Convert1by1(VM.OpCode.SETITEM, null, to);
-                        }
-                        return 3;
-                    }
-                    else if (type == "System.Int64")
-                    {
-                        for (var i = 0; i < data.Length; i += 8)
-                        {
-                            var info = BitConverter.ToInt64(data, i);
-                            _Convert1by1(VM.OpCode.DUP, null, to);
-                            _ConvertPush(i / 8, null, to);
-                            _ConvertPush(info, null, to);
-                            _Convert1by1(VM.OpCode.SETITEM, null, to);
-                        }
-                        return 3;
-                    }
-                    else if (type == "System.UInt64")
-                    {
-                        for (var i = 0; i < data.Length; i += 8)
-                        {
-                            var info = (System.Numerics.BigInteger)BitConverter.ToUInt64(data, i);
-                            _Convert1by1(VM.OpCode.DUP, null, to);
-                            _ConvertPush(i / 8, null, to);
-                            _ConvertPush(info.ToByteArray(), null, to);
                             _Convert1by1(VM.OpCode.SETITEM, null, to);
                         }
                         return 3;
@@ -1331,11 +1386,47 @@ namespace Neo.Compiler.MSIL
             {
                 _Insert1(VM.OpCode.NEWARRAY, null, to);
             }
-            //use slot set before by ldloca
-            _ConvertStLoc(null, src, to, ldloca_slot);
-            ldloca_slot = -1;
+            //now stack  a index, a value
 
+            //getarray
+            //_Convert1by1(VM.OpCode.FROMALTSTACK, null, to);
+            //_Convert1by1(VM.OpCode.DUP, null, to);
+            //_Convert1by1(VM.OpCode.TOALTSTACK, null, to);
+            _Convert1by1(VM.OpCode.DUPFROMALTSTACK, null, to);
 
+            _InsertPush(2, "", to);//move item
+            _Insert1(VM.OpCode.ROLL, null, to);
+
+            _InsertPush(2, "", to);//move value
+            _Insert1(VM.OpCode.ROLL, null, to);
+
+            _Insert1(VM.OpCode.SETITEM, null, to);
+
+            ////然後要將計算棧上的第一個值，寫入第二個值對應的pos
+            //_Convert1by1(VM.OpCode.SWAP, null, to);//replace n to top
+
+            ////push d
+            //_Convert1by1(VM.OpCode.DEPTH, null, to);
+
+            //_Convert1by1(VM.OpCode.DEC, null, to);//d 多了一位，剪掉
+            //_Convert1by1(VM.OpCode.SWAP, null, to);//把n拿上來
+            ////push n
+            ////_ConvertPush(pos, null, to);有n了
+            ////d-n-1
+            //_Convert1by1(VM.OpCode.SUB, null, to);
+            //_Convert1by1(VM.OpCode.DEC, null, to);
+
+            ////push olddepth
+            //_Convert1by1(VM.OpCode.FROMALTSTACK, null, to);
+            //_Convert1by1(VM.OpCode.DUP, null, to);
+            //_Convert1by1(VM.OpCode.TOALTSTACK, null, to);
+            ////(d-n-1)-olddepth
+            //_Convert1by1(VM.OpCode.SUB, null, to);
+
+            ////swap d-n-1 and top
+            //_Convert1by1(VM.OpCode.XSWAP, null, to);
+            ////drop top
+            //_Convert1by1(VM.OpCode.DROP, null, to);
             return 0;
         }
         private int _ConvertNewObj(OpCode src, NeoMethod to)

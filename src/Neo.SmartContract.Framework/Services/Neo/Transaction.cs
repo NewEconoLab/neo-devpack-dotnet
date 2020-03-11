@@ -1,14 +1,32 @@
-namespace Neo.SmartContract.Framework.Services.Neo
+﻿namespace Neo.SmartContract.Framework.Services.Neo
 {
-    public class Transaction
+    public class Transaction : IScriptContainer
     {
-        public readonly byte[] Hash;
-        public readonly byte Version;
-        public readonly uint Nonce;
-        public readonly byte[] Sender;
-        public readonly long SystemFee;
-        public readonly long NetworkFee;
-        public readonly uint ValidUntilBlock;
-        public readonly byte[] Script;
+        public extern byte[] Hash
+        {
+            [Syscall("Neo.Transaction.GetHash")]
+            get;
+        }
+
+        public extern byte Type
+        {
+            [Syscall("Neo.Transaction.GetType")]
+            get;
+        }
+
+        [Syscall("Neo.Transaction.GetAttributes")]
+        public extern TransactionAttribute[] GetAttributes();
+
+        [Syscall("Neo.Transaction.GetInputs")]
+        public extern TransactionInput[] GetInputs();
+
+        [Syscall("Neo.Transaction.GetOutputs")]
+        public extern TransactionOutput[] GetOutputs();
+
+        [Syscall("Neo.Transaction.GetReferences")]
+        public extern TransactionOutput[] GetReferences();
+
+        [Syscall("Neo.Transaction.GetUnspentCoins")]
+        public extern TransactionOutput[] GetUnspentCoins();
     }
 }

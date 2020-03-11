@@ -1,4 +1,4 @@
-using Mono.Cecil;
+﻿using Mono.Cecil;
 using System;
 using System.Security.Cryptography;
 using System.Text;
@@ -29,6 +29,7 @@ namespace Neo.Compiler
         {
             return _regex_ctor.IsMatch(method);
         }
+
         public static bool Is_String_op_Equality(this string method)
         {
             return _regex_string_op_equality.IsMatch(method);
@@ -46,8 +47,7 @@ namespace Neo.Compiler
                 return BitConverter.ToUInt32(sha.ComputeHash(method), 0);
             }
         }
-
-        public static byte[] HexString2Bytes(this string str)
+        public static byte[] HexString2Bytes(string str)
         {
             if (str.IndexOf("0x") == 0)
                 str = str.Substring(2);
@@ -58,7 +58,6 @@ namespace Neo.Compiler
             }
             return outd;
         }
-
         public static byte[] OpDataToBytes(string opdata)
         {
             try  // convert hex string to byte[]
@@ -67,7 +66,7 @@ namespace Neo.Compiler
             }
             catch
             {
-                return Encoding.UTF8.GetBytes(opdata);
+                return System.Text.Encoding.UTF8.GetBytes(opdata);
             }
         }
     }

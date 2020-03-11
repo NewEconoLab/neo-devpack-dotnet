@@ -1,4 +1,4 @@
-namespace Neo.SmartContract.Framework
+﻿namespace Neo.SmartContract.Framework
 {
     public interface IScriptContainer : IApiInterface
     {

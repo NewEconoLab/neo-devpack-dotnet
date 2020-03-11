@@ -1,4 +1,4 @@
-using Neo.Compiler;
+﻿using Neo.Compiler;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -8,7 +8,7 @@ namespace vmtool
 {
     public class FuncExport
     {
-        static string ConvType(string _type)
+        public static string ConvType(string _type)
         {
             switch (_type)
             {
@@ -44,9 +44,6 @@ namespace vmtool
                 case "System.String":
                     return "String";
 
-                case "System.Object[]":
-                    return "Array";
-
                 case "__InteropInterface":
                 case "IInteropInterface":
                     return "InteropInterface";
@@ -57,11 +54,12 @@ namespace vmtool
                 case "System.Object":
                     return "ByteArray";
             }
-            if (_type.Contains("[]"))
+            if (_type != null && _type.Contains("[]"))
                 return "Array";
 
             return "Unknown:" + _type;
         }
+
         public static MyJson.JsonNode_Object Export(NeoModule module, byte[] script)
         {
             var sha256 = System.Security.Cryptography.SHA256.Create();
@@ -80,19 +78,32 @@ namespace vmtool
             }
             outjson.SetDictValue("hash", sb.ToString());
 
+            //metadata
+            var metadataJson = new MyJson.JsonNode_Object();
+            metadataJson.SetDictValue("title", module.Title);
+            metadataJson.SetDictValue("description", module.Description);
+            metadataJson.SetDictValue("version", module.Version);
+            metadataJson.SetDictValue("author", module.Author);
+            metadataJson.SetDictValue("email", module.Email);
+            metadataJson.SetDictValue("has-storage", module.HasStorage);
+            metadataJson.SetDictValue("has-dynamic-invoke", module.HasDynamicInvoke);
+            metadataJson.SetDictValue("is-payable", module.IsPayable);
+            outjson.SetDictValue("metadata", metadataJson);
+
             //entrypoint
-            var entryPoint = "main";
+            outjson.SetDictValue("entrypoint", "Main");
             var mainmethod = module.mapMethods[module.mainMethod];
             if (mainmethod != null)
             {
-                entryPoint = mainmethod.displayName;
+                var name = mainmethod.displayName;
+                outjson.SetDictValue("entrypoint", name);
             }
-
             //functions
-            var methods = new MyJson.JsonNode_Array();
-            outjson["methods"] = methods;
+            var funcsigns = new MyJson.JsonNode_Array();
+            outjson["functions"] = funcsigns;
 
             List<string> names = new List<string>();
+
             foreach (var function in module.mapMethods)
             {
                 var mm = function.Value;
@@ -100,16 +111,15 @@ namespace vmtool
                     continue;
                 if (mm.isPublic == false)
                     continue;
-
+                var ps = mm.name.Split(new char[] { ' ', '(' }, StringSplitOptions.RemoveEmptyEntries);
                 var funcsign = new MyJson.JsonNode_Object();
-                if (function.Value.displayName == entryPoint)
+
+                funcsigns.Add(funcsign);
+                var funcname = ps[1];
+                if (funcname.IndexOf("::") > 0)
                 {
-                    // This is the entryPoint
-                    outjson.SetDictValue("entryPoint", funcsign);
-                }
-                else
-                {
-                    methods.Add(funcsign);
+                    var sps = funcname.Split(new string[] { "::" }, StringSplitOptions.RemoveEmptyEntries);
+                    funcname = sps.Last();
                 }
                 funcsign.SetDictValue("name", function.Value.displayName);
                 if (names.Contains(function.Value.displayName))
@@ -133,7 +143,7 @@ namespace vmtool
                 }
 
                 var rtype = ConvType(mm.returntype);
-                funcsign.SetDictValue("returnType", rtype);
+                funcsign.SetDictValue("returntype", rtype);
             }
 
             //events
@@ -142,7 +152,10 @@ namespace vmtool
             foreach (var events in module.mapEvents)
             {
                 var mm = events.Value;
+
+                var ps = mm.name.Split(new char[] { ' ', '(' }, StringSplitOptions.RemoveEmptyEntries);
                 var funcsign = new MyJson.JsonNode_Object();
+
                 eventsigns.Add(funcsign);
 
                 funcsign.SetDictValue("name", events.Value.displayName);
@@ -160,9 +173,6 @@ namespace vmtool
                         item.SetDictValue("type", ptype);
                     }
                 }
-                //event do not have returntype in nep3
-                //var rtype = ConvType(mm.returntype);
-                //funcsign.SetDictValue("returntype", rtype);
             }
 
             return outjson;

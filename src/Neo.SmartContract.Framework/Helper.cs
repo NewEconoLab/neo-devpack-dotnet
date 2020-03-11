@@ -6,7 +6,7 @@ namespace Neo.SmartContract.Framework
     public static class Helper
     {
         /// <summary>
-        /// Converts byte to byte[] considering the byte as a BigInteger (0x00 at the end)
+        /// Converts byte to byte[].
         /// </summary>
         [Script]
         public extern static byte[] AsByteArray(this byte source);
@@ -133,13 +133,6 @@ namespace Neo.SmartContract.Framework
         //}
 
         /// <summary>
-        /// Converts byte to byte[].
-        /// </summary>
-        [OpCode(OpCode.PUSH1)]
-        [OpCode(OpCode.LEFT)]
-        public extern static byte[] ToByteArray(this byte source);
-
-        /// <summary>
         /// Converts parameter to sbyte from (big)integer range -128-255; faults if out-of-range.
         /// Examples: 256 -> fault; -1 -> -1 [0xff]; 255 -> -1 [0xff]; 0 -> 0 [0x00]; 10 -> 10 [0x0a]; 127 -> 127 [0x7f]; 128 -> -128 [0x80]
         /// </summary>
@@ -238,10 +231,10 @@ namespace Neo.SmartContract.Framework
         [NonemitWithConvert(ConvertMethod.ToBigInteger)]
         public extern static BigInteger ToBigInteger(this string text);
 
-        [Syscall("System.Binary.Serialize")]
+        [Syscall("Neo.Runtime.Serialize")]
         public extern static byte[] Serialize(this object source);
 
-        [Syscall("System.Binary.Deserialize")]
+        [Syscall("Neo.Runtime.Deserialize")]
         public extern static object Deserialize(this byte[] source);
     }
 }

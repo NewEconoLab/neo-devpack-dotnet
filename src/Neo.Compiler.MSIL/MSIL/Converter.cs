@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Numerics;
 using System.Text;
 
@@ -24,7 +23,7 @@ namespace Neo.Compiler.MSIL
     //    }
 
     //}
-    public class DefLogger : ILogger
+    class DefLogger : ILogger
     {
         public void Log(string log)
         {
@@ -43,6 +42,23 @@ namespace Neo.Compiler.MSIL
                 logger = new DefLogger();
             }
             this.logger = logger;
+#if NET47
+            try
+            {
+                var assm = System.Reflection.Assembly.GetAssembly(typeof(System.Action));
+                var name = System.IO.Path.GetFileName(assm.Location);
+                if (name.ToLower() == "mscorlib.dll")
+                {
+                    var path = System.IO.Path.GetFullPath(".");
+                    System.IO.File.Copy(assm.Location, System.IO.Path.Combine(path, name));
+                }
+            }
+            catch
+            {
+
+            }
+            //assm.Location
+#endif
         }
 
         private readonly ILogger logger;
@@ -57,6 +73,9 @@ namespace Neo.Compiler.MSIL
             {
                 option = option ?? ConvOption.Default
             };
+
+            ParseMetadata(this.inModule, this.outModule);
+
             foreach (var t in _in.mapType)
             {
                 if (t.Key.Contains("<"))
@@ -69,32 +88,37 @@ namespace Neo.Compiler.MSIL
                     if (m.Value.method == null) continue;
                     if (m.Value.method.IsAddOn || m.Value.method.IsRemoveOn)
                         continue;//event 自动生成的代码，不要
+                    NeoMethod nm = new NeoMethod();
                     if (m.Value.method.Is_cctor())
                     {
-                        //if cctor contains sth can not be as a const value.
-                        //  then need 1.record these cctor's code.
-                        //            2.insert them to main function
                         CctorSubVM.Parse(m.Value, this.outModule);
                         continue;
                     }
                     if (m.Value.method.Is_ctor()) continue;
-                    NeoMethod nm = new NeoMethod(m.Value);
+                    nm._namespace = m.Value.method.DeclaringType.FullName;
+                    nm.name = m.Value.method.FullName;
+                    nm.displayName = m.Value.method.Name;
+
+                    Mono.Collections.Generic.Collection<Mono.Cecil.CustomAttribute> ca = m.Value.method.CustomAttributes;
+                    foreach (var attr in ca)
+                    {
+                        if (attr.AttributeType.Name == "DisplayNameAttribute")
+                        {
+                            nm.displayName = (string)attr.ConstructorArguments[0].Value;
+                        }
+                    }
+                    nm.inSmartContract = m.Value.method.DeclaringType.BaseType.Name == "SmartContract";
+                    nm.isPublic = m.Value.method.IsPublic;
                     this.methodLink[m.Value] = nm;
                     outModule.mapMethods[nm.name] = nm;
-                }
 
+                }
                 foreach (var e in t.Value.fields)
                 {
                     if (e.Value.isEvent)
                     {
                         NeoEvent ae = new NeoEvent(e.Value);
                         outModule.mapEvents[ae.name] = ae;
-                    }
-                    else if (e.Value.field.IsStatic)
-                    {
-                        var _fieldindex = outModule.mapFields.Count;
-                        var field = new NeoField(e.Key, e.Value.type, _fieldindex);
-                        outModule.mapFields[e.Value.field.FullName] = field;
                     }
                 }
             }
@@ -144,6 +168,11 @@ namespace Neo.Compiler.MSIL
                             nm.paramtypes.Add(new NeoParam(src.name, src.type));
                         }
 
+                        foreach (var @var in m.Value.body_Variables)
+                        {
+                            nm.body_Variables.Add(@var);
+                        }
+
                         if (IsAppCall(m.Value.method, out byte[] outcall))
                             continue;
                         if (IsNonCall(m.Value.method))
@@ -151,14 +180,6 @@ namespace Neo.Compiler.MSIL
                         if (IsMixAttribute(m.Value.method, out VM.OpCode[] opcodes, out string[] opdata))
                             continue;
 
-                        if (m.Key.Contains("::Main("))
-                        {
-                            NeoMethod _m = outModule.mapMethods[m.Key];
-                            if (_m.inSmartContract)
-                            {
-                                nm.isEntry = true;
-                            }
-                        }
                         this.ConvertMethod(m.Value, nm);
                     }
                     //catch (Exception err)
@@ -167,18 +188,12 @@ namespace Neo.Compiler.MSIL
                     //}
                 }
             }
-
-            // Check entry Points
-
-            var entryPoints = outModule.mapMethods.Values.Where(u => u.inSmartContract).Select(u => u.type).Distinct().Count();
-
-            if (entryPoints > 1)
-                throw new EntryPointException(entryPoints, "The smart contract contains multiple entryPoints, please check it.");
-
             //转换完了，做个link，全部拼到一起
             string mainmethod = "";
+
             foreach (var key in outModule.mapMethods.Keys)
             {
+
                 if (key.Contains("::Main("))
                 {
                     NeoMethod m = outModule.mapMethods[key];
@@ -194,30 +209,19 @@ namespace Neo.Compiler.MSIL
                             }
                         }
                     }
+
                 }
             }
-
-            if (string.IsNullOrEmpty(mainmethod))
+            if (mainmethod == "")
             {
-                mainmethod = InsertAutoEntry();
-
-                if (string.IsNullOrEmpty(mainmethod))
-                {
-                    throw new EntryPointException(0, "The smart contract doesn't contain any entryPoints, please check it.");
-                }
-
-                logger.Log("Auto Insert entrypoint.");
+                throw new Exception("Can't find EntryPoint,Check it.");
             }
             else
             {
                 //单一默认入口
                 logger.Log("Find entrypoint:" + mainmethod);
             }
-            var attr = outModule.mapMethods.Values.Where(u => u.inSmartContract).Select(u => u.type.attributes.ToArray()).FirstOrDefault();
-            if (attr?.Length > 0)
-            {
-                outModule.attributes.AddRange(attr);
-            }
+
             outModule.mainMethod = mainmethod;
             this.LinkCode(mainmethod);
             //this.findFirstFunc();//得找到第一个函数
@@ -227,108 +231,6 @@ namespace Neo.Compiler.MSIL
             //this.outModule.Build();
             return outModule;
         }
-
-        private string InsertAutoEntry()
-        {
-            string name = "::autoentrypoint";
-            NeoMethod autoEntry = new NeoMethod();
-            autoEntry._namespace = "";
-            autoEntry.name = "Main";
-            autoEntry.displayName = "main";
-            autoEntry.paramtypes.Add(new NeoParam(name, "string"));
-            autoEntry.paramtypes.Add(new NeoParam(name, "array"));
-            autoEntry.returntype = "object";
-            autoEntry.funcaddr = 0;
-            if (!FillEntryMethod(autoEntry))
-            {
-                return "";
-            }
-            outModule.mapMethods[name] = autoEntry;
-            return name;
-        }
-
-        private bool FillEntryMethod(NeoMethod to)
-        {
-            this.addr = 0;
-            this.addrconv.Clear();
-
-#if DEBUG
-            _Insert1(VM.OpCode.NOP, "this is a debug code.", to);
-#endif
-            _insertSharedStaticVarCode(to);
-            _insertBeginCodeEntry(to);
-
-            bool inserted = false;
-            List<int> calladdr = new List<int>();
-            List<int> calladdrbegin = new List<int>();
-            //add callfunc
-            foreach (var m in this.outModule.mapMethods)
-            {
-                if (m.Value.inSmartContract && m.Value.isPublic)
-                {
-                    //add a call;
-                    //get name
-                    calladdrbegin.Add(this.addr);
-                    //_Insert1(VM.OpCode.DUPFROMALTSTACK, "get name", to);
-                    //_InsertPush(0, "", to);
-                    //_Insert1(VM.OpCode.PICKITEM, "", to);
-                    _Insert1(VM.OpCode.LDARG0, "get name", to);
-
-                    _InsertPush(System.Text.Encoding.UTF8.GetBytes(m.Value.displayName), "", to);
-                    _Insert1(VM.OpCode.NUMEQUAL, "", to);
-                    calladdr.Add(this.addr);//record add fix jumppos later
-                    _Insert1(VM.OpCode.JMPIFNOT_L, "tonextcallpos", to, new byte[] { 0, 0, 0, 0 });
-                    if (m.Value.paramtypes.Count > 0)
-                    {
-                        for (var i = m.Value.paramtypes.Count - 1; i >= 0; i--)
-                        {
-                            _Insert1(VM.OpCode.LDARG1, "get params array", to);
-                            _InsertPush(i, "get one param:" + i, to);
-                            _Insert1(VM.OpCode.PICKITEM, "", to);
-                        }
-                        //add params;
-                    }
-                    //call and return it
-                    var c = _Insert1(VM.OpCode.CALL_L, "", to, new byte[] { 0, 0, 0, 0 });
-                    c.needfixfunc = true;
-                    c.srcfunc = m.Key;
-                    if (m.Value.returntype == "System.Void")
-                    {
-                        _Insert1(VM.OpCode.PUSH0, "", to);
-                    }
-                    _insertEndCode(to, null);
-                    _Insert1(VM.OpCode.RET, "", to);
-                    inserted = true;
-                }
-            }
-
-            if (!inserted) return false;
-
-            //add returen
-            calladdrbegin.Add(this.addr);//record add fix jumppos later
-
-            _insertEndCode(to, null);
-            //if go here,mean methodname is wrong
-            //use throw to instead ret,make vm  fault.
-            _Insert1(VM.OpCode.THROW, "", to);
-            //_Insert1(VM.OpCode.RET, "", to);
-
-            //convert all Jmp
-            for (var i = 0; i < calladdr.Count; i++)
-            {
-                var addr = calladdr[i];
-                var nextaddr = calladdrbegin[i + 1];
-                var op = to.body_Codes[addr];
-                Int32 addroff = (Int32)(nextaddr - addr);
-                op.bytes = BitConverter.GetBytes(addroff);
-            }
-#if DEBUG
-            _Insert1(VM.OpCode.NOP, "this is a end debug code.", to);
-#endif
-            ConvertAddrInMethod(to);
-            return true;
-        }
-
         private void LinkCode(string main)
         {
             if (this.outModule.mapMethods.ContainsKey(main) == false)
@@ -375,32 +277,30 @@ namespace Neo.Compiler.MSIL
                 {//需要地址转换
                     var addrfunc = this.outModule.mapMethods[c.srcfunc].funcaddr;
 
-                    if (c.bytes.Length > 4)
+                    if (c.bytes.Length > 2)
                     {
-                        var len = c.bytes.Length - 4;
+                        var len = c.bytes.Length - 2;
                         int wantaddr = addrfunc - c.addr - len;
 
-                        if (wantaddr < Int32.MinValue || wantaddr > Int32.MaxValue)
+                        if (wantaddr < Int16.MinValue || wantaddr > Int16.MaxValue)
                         {
                             throw new Exception("addr jump is too far.");
                         }
-                        Int32 addrconv = (Int32)wantaddr;
+                        Int16 addrconv = (Int16)wantaddr;
 
                         var bts = BitConverter.GetBytes(addrconv);
-                        c.bytes[c.bytes.Length - 4] = bts[0];
-                        c.bytes[c.bytes.Length - 3] = bts[1];
-                        c.bytes[c.bytes.Length - 2] = bts[2];
-                        c.bytes[c.bytes.Length - 1] = bts[3];
+                        c.bytes[c.bytes.Length - 2] = bts[0];
+                        c.bytes[c.bytes.Length - 1] = bts[1];
                     }
-                    else if (c.bytes.Length == 4)
+                    else if (c.bytes.Length == 2)
                     {
                         int wantaddr = addrfunc - c.addr;
 
-                        if (wantaddr < Int32.MinValue || wantaddr > Int32.MaxValue)
+                        if (wantaddr < Int16.MinValue || wantaddr > Int16.MaxValue)
                         {
                             throw new Exception("addr jump is too far.");
                         }
-                        Int32 addrconv = (Int32)wantaddr;
+                        Int16 addrconv = (Int16)wantaddr;
                         c.bytes = BitConverter.GetBytes(addrconv);
                     }
                     else
@@ -412,8 +312,70 @@ namespace Neo.Compiler.MSIL
             }
         }
 
-        private void FillMethod(ILMethod from, NeoMethod to, bool withReturn)
+        private static void ParseMetadata(ILModule inModule, NeoModule outModule)
         {
+            var assemblyDef = inModule.module.Assembly;
+            outModule.Title = assemblyDef.Name.Name;
+            outModule.Version = assemblyDef.Name.Version.ToString();
+
+            foreach (var attrib in assemblyDef.CustomAttributes)
+            {
+                switch (attrib.AttributeType.FullName)
+                {
+                    case "System.Reflection.AssemblyTitleAttribute":
+                        if (outModule.Title == assemblyDef.Name.Name)
+                        {
+                            outModule.Title = attrib.ConstructorArguments[0].Value.ToString();
+                        }
+                        break;
+                    case "System.Reflection.AssemblyDescriptionAttribute":
+                        if (string.IsNullOrEmpty(outModule.Description))
+                        {
+                            outModule.Description = attrib.ConstructorArguments[0].Value.ToString();
+                        }
+                        break;
+                    case "Neo.SmartContract.Framework.ContractAuthor":
+                        outModule.Author = attrib.ConstructorArguments[0].Value.ToString();
+                        break;
+                    case "Neo.SmartContract.Framework.ContractDescription":
+                        outModule.Description = attrib.ConstructorArguments[0].Value.ToString();
+                        break;
+                    case "Neo.SmartContract.Framework.ContractEmail":
+                        outModule.Email = attrib.ConstructorArguments[0].Value.ToString();
+                        break;
+                    case "Neo.SmartContract.Framework.FeaturesAttribute":
+                        {
+                            // define constants to mirror ContractPropertyState values
+                            const byte HAS_STORAGE = 1 << 0;
+                            const byte HAS_DYNAMIC_INVOKE = 1 << 1;
+                            const byte PAYABLE = 1 << 2;
+
+                            var features = (byte)attrib.ConstructorArguments[0].Value;
+                            outModule.HasDynamicInvoke = (features & HAS_DYNAMIC_INVOKE) != 0;
+                            outModule.HasStorage = (features & HAS_STORAGE) != 0;
+                            outModule.IsPayable = (features & PAYABLE) != 0;
+                        }
+                        break;
+                    case "Neo.SmartContract.Framework.ContractTitle":
+                        outModule.Title = attrib.ConstructorArguments[0].Value.ToString();
+                        break;
+                    case "Neo.SmartContract.Framework.ContractVersion":
+                        outModule.Version = attrib.ConstructorArguments[0].Value.ToString();
+                        break;
+                }
+            }
+        }
+
+        private void ConvertMethod(ILMethod from, NeoMethod to)
+        {
+
+
+            this.addr = 0;
+            this.addrconv.Clear();
+
+            //插入一个记录深度的代码，再往前的是参数
+            _insertBeginCode(from, to);
+
             int skipcount = 0;
             foreach (var src in from.body_Codes.Values)
             {
@@ -426,8 +388,7 @@ namespace Neo.Compiler.MSIL
                     //在return之前加入清理参数代码
                     if (src.code == CodeEx.Ret)//before return
                     {
-                        if (!withReturn) break;
-                        _insertEndCode(to, src);
+                        _insertEndCode(from, to, src);
                     }
                     try
                     {
@@ -439,27 +400,13 @@ namespace Neo.Compiler.MSIL
                     }
                 }
             }
+
             ConvertAddrInMethod(to);
-        }
-
-        private void ConvertMethod(ILMethod from, NeoMethod to)
-        {
-            this.addr = 0;
-            this.addrconv.Clear();
-
-            if (to.isEntry)
-            {
-                _insertSharedStaticVarCode(to);
-            }
-            //插入一个记录深度的代码，再往前的是参数
-            _insertBeginCode(from, to);
-
-            FillMethod(from, to, true);
         }
 
         private readonly Dictionary<int, int> addrconv = new Dictionary<int, int>();
         private int addr = 0;
-        private int ldloca_slot = -1;
+
         //Dictionary<string, string[]> srccodes = new Dictionary<string, string[]>();
         //string getSrcCode(string url, int line)
         //{
@@ -480,10 +427,8 @@ namespace Neo.Compiler.MSIL
         //}
         static int getNumber(NeoCode code)
         {
-            if (code.code <= VM.OpCode.PUSHINT256)
+            if (code.code <= VM.OpCode.PUSHBYTES75 && code.code >= VM.OpCode.PUSHBYTES1)
                 return (int)new BigInteger(code.bytes);
-
-            else if (code.code == VM.OpCode.PUSHM1) return -1;
             else if (code.code == VM.OpCode.PUSH0) return 0;
             else if (code.code == VM.OpCode.PUSH1) return 1;
             else if (code.code == VM.OpCode.PUSH2) return 2;
@@ -513,7 +458,6 @@ namespace Neo.Compiler.MSIL
             var n = BitConverter.ToInt32(target, 0);
             return n;
         }
-
         private void ConvertAddrInMethod(NeoMethod to)
         {
             foreach (var c in to.body_Codes.Values)
@@ -524,7 +468,7 @@ namespace Neo.Compiler.MSIL
                     try
                     {
                         var _addr = addrconv[c.srcaddr];
-                        Int32 addroff = (Int32)(_addr - c.addr);
+                        Int16 addroff = (Int16)(_addr - c.addr);
                         c.bytes = BitConverter.GetBytes(addroff);
                         c.needfix = false;
                     }
@@ -532,10 +476,12 @@ namespace Neo.Compiler.MSIL
                     {
                         throw new Exception("cannot convert addr in: " + to.name + "\r\n");
                     }
+
+
+
                 }
             }
         }
-
         private int ConvertCode(ILMethod method, OpCode src, NeoMethod to)
         {
             int skipcount = 0;
@@ -553,7 +499,7 @@ namespace Neo.Compiler.MSIL
                     break;
 
                 case CodeEx.Ldnull:
-                    _Convert1by1(VM.OpCode.PUSHNULL, src, to);
+                    _ConvertPush(new byte[0], src, to);
                     break;
 
                 case CodeEx.Ldc_I4:
@@ -657,7 +603,7 @@ namespace Neo.Compiler.MSIL
                 case CodeEx.Leave:
                 case CodeEx.Leave_S:
                     {
-                        var code = _Convert1by1(VM.OpCode.JMP_L, src, to, new byte[] { 0, 0, 0, 0 });
+                        var code = _Convert1by1(VM.OpCode.JMP, src, to, new byte[] { 0, 0 });
                         code.needfix = true;
                         code.srcaddr = src.tokenAddr_Index;
                     }
@@ -682,7 +628,7 @@ namespace Neo.Compiler.MSIL
                 case CodeEx.Brtrue:
                 case CodeEx.Brtrue_S:
                     {
-                        var code = _Convert1by1(VM.OpCode.JMPIF_L, src, to, new byte[] { 0, 0, 0, 0 });
+                        var code = _Convert1by1(VM.OpCode.JMPIF, src, to, new byte[] { 0, 0 });
                         code.needfix = true;
                         code.srcaddr = src.tokenAddr_Index;
                     }
@@ -690,7 +636,7 @@ namespace Neo.Compiler.MSIL
                 case CodeEx.Brfalse:
                 case CodeEx.Brfalse_S:
                     {
-                        var code = _Convert1by1(VM.OpCode.JMPIFNOT_L, src, to, new byte[] { 0, 0, 0, 0 });
+                        var code = _Convert1by1(VM.OpCode.JMPIFNOT, src, to, new byte[] { 0, 0 });
                         code.needfix = true;
                         code.srcaddr = src.tokenAddr_Index;
                     }
@@ -699,7 +645,7 @@ namespace Neo.Compiler.MSIL
                 case CodeEx.Beq_S:
                     {
                         _Convert1by1(VM.OpCode.NUMEQUAL, src, to);
-                        var code = _Convert1by1(VM.OpCode.JMPIF_L, null, to, new byte[] { 0, 0, 0, 0 });
+                        var code = _Convert1by1(VM.OpCode.JMPIF, null, to, new byte[] { 0, 0 });
                         code.needfix = true;
                         code.srcaddr = src.tokenAddr_Index;
                     }
@@ -712,7 +658,7 @@ namespace Neo.Compiler.MSIL
                         _Convert1by1(VM.OpCode.ABS, null, to);
                         _Convert1by1(VM.OpCode.SWAP, null, to);
                         _Convert1by1(VM.OpCode.NUMNOTEQUAL, null, to);
-                        var code = _Convert1by1(VM.OpCode.JMPIF_L, null, to, new byte[] { 0, 0, 0, 0 });
+                        var code = _Convert1by1(VM.OpCode.JMPIF, null, to, new byte[] { 0, 0 });
                         code.needfix = true;
                         code.srcaddr = src.tokenAddr_Index;
                     }
@@ -721,7 +667,7 @@ namespace Neo.Compiler.MSIL
                 case CodeEx.Blt_S:
                     {
                         _Convert1by1(VM.OpCode.LT, src, to);
-                        var code = _Convert1by1(VM.OpCode.JMPIF_L, null, to, new byte[] { 0, 0, 0, 0 });
+                        var code = _Convert1by1(VM.OpCode.JMPIF, null, to, new byte[] { 0, 0 });
                         code.needfix = true;
                         code.srcaddr = src.tokenAddr_Index;
                     }
@@ -734,7 +680,7 @@ namespace Neo.Compiler.MSIL
                         _Convert1by1(VM.OpCode.ABS, null, to);
                         _Convert1by1(VM.OpCode.SWAP, null, to);
                         _Convert1by1(VM.OpCode.LT, null, to);
-                        var code = _Convert1by1(VM.OpCode.JMPIF_L, null, to, new byte[] { 0, 0, 0, 0 });
+                        var code = _Convert1by1(VM.OpCode.JMPIF, null, to, new byte[] { 0, 0 });
                         code.needfix = true;
                         code.srcaddr = src.tokenAddr_Index;
                     }
@@ -742,8 +688,8 @@ namespace Neo.Compiler.MSIL
                 case CodeEx.Ble:
                 case CodeEx.Ble_S:
                     {
-                        _Convert1by1(VM.OpCode.LE, src, to);
-                        var code = _Convert1by1(VM.OpCode.JMPIF_L, null, to, new byte[] { 0, 0, 0, 0 });
+                        _Convert1by1(VM.OpCode.LTE, src, to);
+                        var code = _Convert1by1(VM.OpCode.JMPIF, null, to, new byte[] { 0, 0 });
                         code.needfix = true;
                         code.srcaddr = src.tokenAddr_Index;
                     }
@@ -755,8 +701,8 @@ namespace Neo.Compiler.MSIL
                         _Convert1by1(VM.OpCode.SWAP, null, to);
                         _Convert1by1(VM.OpCode.ABS, null, to);
                         _Convert1by1(VM.OpCode.SWAP, null, to);
-                        _Convert1by1(VM.OpCode.LE, null, to);
-                        var code = _Convert1by1(VM.OpCode.JMPIF_L, null, to, new byte[] { 0, 0, 0, 0 });
+                        _Convert1by1(VM.OpCode.LTE, null, to);
+                        var code = _Convert1by1(VM.OpCode.JMPIF, null, to, new byte[] { 0, 0 });
                         code.needfix = true;
                         code.srcaddr = src.tokenAddr_Index;
                     }
@@ -765,7 +711,7 @@ namespace Neo.Compiler.MSIL
                 case CodeEx.Bgt_S:
                     {
                         _Convert1by1(VM.OpCode.GT, src, to);
-                        var code = _Convert1by1(VM.OpCode.JMPIF_L, null, to, new byte[] { 0, 0, 0, 0 });
+                        var code = _Convert1by1(VM.OpCode.JMPIF, null, to, new byte[] { 0, 0 });
                         code.needfix = true;
                         code.srcaddr = src.tokenAddr_Index;
                     }
@@ -778,7 +724,7 @@ namespace Neo.Compiler.MSIL
                         _Convert1by1(VM.OpCode.ABS, null, to);
                         _Convert1by1(VM.OpCode.SWAP, null, to);
                         _Convert1by1(VM.OpCode.GT, null, to);
-                        var code = _Convert1by1(VM.OpCode.JMPIF_L, null, to, new byte[] { 0, 0, 0, 0 });
+                        var code = _Convert1by1(VM.OpCode.JMPIF, null, to, new byte[] { 0, 0 });
                         code.needfix = true;
                         code.srcaddr = src.tokenAddr_Index;
                     }
@@ -787,8 +733,8 @@ namespace Neo.Compiler.MSIL
                 case CodeEx.Bge_S:
                     {
 
-                        _Convert1by1(VM.OpCode.GE, src, to);
-                        var code = _Convert1by1(VM.OpCode.JMPIF_L, null, to, new byte[] { 0, 0, 0, 0 });
+                        _Convert1by1(VM.OpCode.GTE, src, to);
+                        var code = _Convert1by1(VM.OpCode.JMPIF, null, to, new byte[] { 0, 0 });
                         code.needfix = true;
                         code.srcaddr = src.tokenAddr_Index;
                     }
@@ -800,8 +746,8 @@ namespace Neo.Compiler.MSIL
                         _Convert1by1(VM.OpCode.SWAP, null, to);
                         _Convert1by1(VM.OpCode.ABS, null, to);
                         _Convert1by1(VM.OpCode.SWAP, null, to);
-                        _Convert1by1(VM.OpCode.GE, null, to);
-                        var code = _Convert1by1(VM.OpCode.JMPIF_L, null, to, new byte[] { 0, 0, 0, 0 });
+                        _Convert1by1(VM.OpCode.GTE, null, to);
+                        var code = _Convert1by1(VM.OpCode.JMPIF, null, to, new byte[] { 0, 0 });
                         code.needfix = true;
                         code.srcaddr = src.tokenAddr_Index;
                     }
@@ -868,11 +814,10 @@ namespace Neo.Compiler.MSIL
                     break;
                 case CodeEx.Cgt:
                 case CodeEx.Cgt_Un:
-                    skipcount = _ConvertCgt(method, src, to);
-
+                    _Convert1by1(VM.OpCode.GT, src, to);
                     break;
                 case CodeEx.Ceq:
-                    skipcount = _ConvertCeq(method, src, to);
+                    _Convert1by1(VM.OpCode.NUMEQUAL, src, to);
                     break;
 
                 //call
@@ -921,73 +866,71 @@ namespace Neo.Compiler.MSIL
                     _Convert1by1(VM.OpCode.PICKITEM, src, to);
                     break;
                 case CodeEx.Ldlen:
-                    _Convert1by1(VM.OpCode.SIZE, src, to);
+                    _Convert1by1(VM.OpCode.ARRAYSIZE, src, to);
                     break;
 
                 case CodeEx.Stelem_I1:
                     {
-                        throw new Exception("no support for byte[] setvalue for now.");
-                        //this code is from NEO2 , and it is not work for now.
-                        //// WILL TRACE VARIABLE ORIGIN "Z" IN ALTSTACK!
-                        //// EXPECTS:  source[index] = b; // index and b must be variables! constants will fail!
-                        ///*
-                        //9 6a DUPFROMALTSTACK
-                        //8 5Z PUSHZ
-                        //7 c3 PICKITEM
-                        //6 6a DUPFROMALTSTACK
-                        //5 5Y PUSHY
-                        //4 c3 PICKITEM
-                        //3 6a DUPFROMALTSTACK
-                        //2 5X PUSHX
-                        //1 c3 PICKITEM
-                        //*/
+                        // WILL TRACE VARIABLE ORIGIN "Z" IN ALTSTACK!
+                        // EXPECTS:  source[index] = b; // index and b must be variables! constants will fail!
+                        /*
+                        9 6a DUPFROMALTSTACK
+                        8 5Z PUSHZ
+                        7 c3 PICKITEM
+                        6 6a DUPFROMALTSTACK
+                        5 5Y PUSHY
+                        4 c3 PICKITEM
+                        3 6a DUPFROMALTSTACK
+                        2 5X PUSHX
+                        1 c3 PICKITEM
+                        */
 
-                        //if ((to.body_Codes[addr - 1].code == VM.OpCode.PICKITEM)
-                        //  && (to.body_Codes[addr - 4].code == VM.OpCode.PICKITEM)
-                        //  && (to.body_Codes[addr - 7].code == VM.OpCode.PICKITEM)
-                        //  && (to.body_Codes[addr - 3].code == VM.OpCode.DUPFROMALTSTACK)
-                        //  && (to.body_Codes[addr - 6].code == VM.OpCode.DUPFROMALTSTACK)
-                        //  && (to.body_Codes[addr - 9].code == VM.OpCode.DUPFROMALTSTACK)
-                        //  && ((to.body_Codes[addr - 2].code >= VM.OpCode.PUSH0) && (to.body_Codes[addr - 2].code <= VM.OpCode.PUSH16))
-                        //  && ((to.body_Codes[addr - 5].code >= VM.OpCode.PUSH0) && (to.body_Codes[addr - 5].code <= VM.OpCode.PUSH16))
-                        //  && ((to.body_Codes[addr - 8].code >= VM.OpCode.PUSH0) && (to.body_Codes[addr - 8].code <= VM.OpCode.PUSH16))
-                        //  )
-                        //{
-                        //    // WILL REQUIRE TO PROCESS INFORMATION AND STORE IT AGAIN ON ALTSTACK CORRECT POSITION
-                        //    VM.OpCode PushZ = to.body_Codes[addr - 8].code;
+                        if ((to.body_Codes[addr - 1].code == VM.OpCode.PICKITEM)
+                          && (to.body_Codes[addr - 4].code == VM.OpCode.PICKITEM)
+                          && (to.body_Codes[addr - 7].code == VM.OpCode.PICKITEM)
+                          && (to.body_Codes[addr - 3].code == VM.OpCode.DUPFROMALTSTACK)
+                          && (to.body_Codes[addr - 6].code == VM.OpCode.DUPFROMALTSTACK)
+                          && (to.body_Codes[addr - 9].code == VM.OpCode.DUPFROMALTSTACK)
+                          && ((to.body_Codes[addr - 2].code >= VM.OpCode.PUSH0) && (to.body_Codes[addr - 2].code <= VM.OpCode.PUSH16))
+                          && ((to.body_Codes[addr - 5].code >= VM.OpCode.PUSH0) && (to.body_Codes[addr - 5].code <= VM.OpCode.PUSH16))
+                          && ((to.body_Codes[addr - 8].code >= VM.OpCode.PUSH0) && (to.body_Codes[addr - 8].code <= VM.OpCode.PUSH16))
+                          )
+                        {
+                            // WILL REQUIRE TO PROCESS INFORMATION AND STORE IT AGAIN ON ALTSTACK CORRECT POSITION
+                            VM.OpCode PushZ = to.body_Codes[addr - 8].code;
 
-                        //    _Convert1by1(VM.OpCode.PUSH2, null, to);
-                        //    _Convert1by1(VM.OpCode.PICK, null, to);
-                        //    _Convert1by1(VM.OpCode.PUSH2, null, to);
-                        //    _Convert1by1(VM.OpCode.PICK, null, to);
-                        //    _Convert1by1(VM.OpCode.LEFT, null, to);
-                        //    _Convert1by1(VM.OpCode.SWAP, null, to);
-                        //    _Convert1by1(VM.OpCode.CAT, null, to);
-                        //    _Convert1by1(VM.OpCode.ROT, null, to);
-                        //    _Convert1by1(VM.OpCode.ROT, null, to);
-                        //    _Convert1by1(VM.OpCode.OVER, null, to);
-                        //    _Convert1by1(VM.OpCode.SIZE, null, to);
-                        //    _Convert1by1(VM.OpCode.DEC, null, to);
-                        //    _Convert1by1(VM.OpCode.SWAP, null, to);
-                        //    _Convert1by1(VM.OpCode.SUB, null, to);
-                        //    _Convert1by1(VM.OpCode.RIGHT, null, to);
-                        //    _Convert1by1(VM.OpCode.CAT, null, to);
+                            _Convert1by1(VM.OpCode.PUSH2, null, to);
+                            _Convert1by1(VM.OpCode.PICK, null, to);
+                            _Convert1by1(VM.OpCode.PUSH2, null, to);
+                            _Convert1by1(VM.OpCode.PICK, null, to);
+                            _Convert1by1(VM.OpCode.LEFT, null, to);
+                            _Convert1by1(VM.OpCode.SWAP, null, to);
+                            _Convert1by1(VM.OpCode.CAT, null, to);
+                            _Convert1by1(VM.OpCode.ROT, null, to);
+                            _Convert1by1(VM.OpCode.ROT, null, to);
+                            _Convert1by1(VM.OpCode.OVER, null, to);
+                            _Convert1by1(VM.OpCode.ARRAYSIZE, null, to);
+                            _Convert1by1(VM.OpCode.DEC, null, to);
+                            _Convert1by1(VM.OpCode.SWAP, null, to);
+                            _Convert1by1(VM.OpCode.SUB, null, to);
+                            _Convert1by1(VM.OpCode.RIGHT, null, to);
+                            _Convert1by1(VM.OpCode.CAT, null, to);
 
-                        //    // FINAL RESULT MUST GO BACK TO POSITION Z ON ALTSTACK
+                            // FINAL RESULT MUST GO BACK TO POSITION Z ON ALTSTACK
 
-                        //    // FINAL STACK:
-                        //    // 4 get array (dupfromaltstack)
-                        //    // 3 PushZ
-                        //    // 2 result
-                        //    // 1 setitem
+                            // FINAL STACK:
+                            // 4 get array (dupfromaltstack)
+                            // 3 PushZ
+                            // 2 result
+                            // 1 setitem
 
-                        //    _Convert1by1(VM.OpCode.DUPFROMALTSTACK, null, to);  // stack: [ array , result , ... ]
-                        //    _Convert1by1(PushZ, null, to);                      // stack: [ pushz, array , result , ... ]
-                        //    _Convert1by1(VM.OpCode.ROT, null, to);              // stack: [ result, pushz, array , ... ]
-                        //    _Convert1by1(VM.OpCode.SETITEM, null, to);          // stack: [ result, pushz, array , ... ]
-                        //}
-                        //else
-                        //    throw new Exception("neomachine currently supports only variable indexed bytearray attribution, example: byte[] source; int index = 0; byte b = 1; source[index] = b;");
+                            _Convert1by1(VM.OpCode.DUPFROMALTSTACK, null, to);  // stack: [ array , result , ... ]
+                            _Convert1by1(PushZ, null, to);                      // stack: [ pushz, array , result , ... ]
+                            _Convert1by1(VM.OpCode.ROT, null, to);              // stack: [ result, pushz, array , ... ]
+                            _Convert1by1(VM.OpCode.SETITEM, null, to);          // stack: [ result, pushz, array , ... ]
+                        }
+                        else
+                            throw new Exception("neomachine currently supports only variable indexed bytearray attribution, example: byte[] source; int index = 0; byte b = 1; source[index] = b;");
                     } // end case
                     break;
                 case CodeEx.Stelem_Any:
@@ -1043,7 +986,6 @@ namespace Neo.Compiler.MSIL
                 case CodeEx.Conv_U2:
                 case CodeEx.Conv_U4:
                 case CodeEx.Conv_U8:
-                    this.addrconv[src.addr] = addr;
                     break;
 
                 ///////////////////////////////////////////////
@@ -1067,6 +1009,7 @@ namespace Neo.Compiler.MSIL
                     break;
 
                 case CodeEx.Ldsfld:
+
                     {
                         _Convert1by1(VM.OpCode.NOP, src, to);
                         var d = src.tokenUnknown as Mono.Cecil.FieldDefinition;
@@ -1076,8 +1019,8 @@ namespace Neo.Compiler.MSIL
                             ((d.Attributes & Mono.Cecil.FieldAttributes.Static) > 0)
                             )
                         {
-                            var fname = d.FullName;// d.DeclaringType.FullName + "::" + d.Name;
-                            var _src = outModule.staticfieldsWithConstValue[fname];
+                            var fname = d.DeclaringType.FullName + "::" + d.Name;
+                            var _src = outModule.staticfields[fname];
                             if (_src is byte[])
                             {
                                 var bytesrc = (byte[])_src;
@@ -1112,6 +1055,7 @@ namespace Neo.Compiler.MSIL
                             break;
                         }
 
+
                         //如果是调用event导致的这个代码，只找出他的名字
                         if (d.DeclaringType.HasEvents)
                         {
@@ -1134,17 +1078,9 @@ namespace Neo.Compiler.MSIL
                             }
                         }
                         else
-                        {
-                            var field = this.outModule.mapFields[d.FullName];
-                            _Convert1by1(VM.OpCode.LDSFLD, src, to, new byte[] { (byte)field.index });
+                        {//如果走到这里，是一个静态成员，但是没有添加readonly 表示
+                            throw new Exception("Just allow defined a static variable with readonly." + d.FullName);
                         }
-                    }
-                    break;
-                case CodeEx.Stsfld:
-                    {
-                        var d = src.tokenUnknown as Mono.Cecil.FieldDefinition;
-                        var field = this.outModule.mapFields[d.FullName];
-                        _Convert1by1(VM.OpCode.STSFLD, src, to, new byte[] { (byte)field.index });
                     }
                     break;
                 case CodeEx.Throw:
@@ -1154,13 +1090,17 @@ namespace Neo.Compiler.MSIL
                         //_Insert1(VM.OpCode.RET, "", to);
                     }
                     break;
-
                 default:
+#if WITHPDB
                     logger.Log("unsupported instruction " + src.code + "\r\n   in: " + to.name + "\r\n");
+                    break;
+#else
                     throw new Exception("unsupported instruction " + src.code + "\r\n   in: " + to.name + "\r\n");
+#endif
             }
 
             return skipcount;
         }
+
     }
 }

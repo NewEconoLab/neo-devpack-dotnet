@@ -1,6 +1,5 @@
 using System;
 using System.Numerics;
-using System.Text;
 
 namespace Neo.Compiler.MSIL
 {
@@ -35,6 +34,7 @@ namespace Neo.Compiler.MSIL
         private NeoCode _InsertPush(byte[] data, string comment, NeoMethod to)
         {
             if (data.Length == 0) return _Insert1(VM.OpCode.PUSH0, comment, to);
+            if (data.Length <= 75) return _Insert1((VM.OpCode)data.Length, comment, to, data);
             byte prefixLen;
             VM.OpCode code;
             if (data.Length <= byte.MaxValue)
@@ -62,7 +62,7 @@ namespace Neo.Compiler.MSIL
         {
             if (i == 0) return _Insert1(VM.OpCode.PUSH0, comment, to);
             if (i == -1) return _Insert1(VM.OpCode.PUSHM1, comment, to);
-            if (i > 0 && i <= 16) return _Insert1(VM.OpCode.PUSH0 + (byte)i, comment, to);
+            if (i > 0 && i <= 16) return _Insert1((VM.OpCode)(byte)i + 0x50, comment, to);
             return _InsertPush(((BigInteger)i).ToByteArray(), comment, to);
         }
 
@@ -78,7 +78,9 @@ namespace Neo.Compiler.MSIL
                 _code.debugline = src.debugline;
                 _code.debugILAddr = src.addr;
                 _code.debugILCode = src.code.ToString();
+                _code.sequencePoint = src.sequencePoint;
             }
+
 
             addr++;
 
@@ -96,6 +98,7 @@ namespace Neo.Compiler.MSIL
         private NeoCode _ConvertPush(byte[] data, OpCode src, NeoMethod to)
         {
             if (data.Length == 0) return _Convert1by1(VM.OpCode.PUSH0, src, to);
+            if (data.Length <= 75) return _Convert1by1((VM.OpCode)data.Length, src, to, data);
             byte prefixLen;
             VM.OpCode code;
             if (data.Length <= byte.MaxValue)
@@ -123,7 +126,7 @@ namespace Neo.Compiler.MSIL
         {
             if (i == 0) return _Convert1by1(VM.OpCode.PUSH0, src, to);
             if (i == -1) return _Convert1by1(VM.OpCode.PUSHM1, src, to);
-            if (i > 0 && i <= 16) return _Convert1by1(VM.OpCode.PUSH0 + (byte)i, src, to);
+            if (i > 0 && i <= 16) return _Convert1by1((VM.OpCode)(byte)i + 0x50, src, to);
             return _ConvertPush(((BigInteger)i).ToByteArray(), src, to);
         }
         private int _ConvertPushI8WithConv(ILMethod from, long i, OpCode src, NeoMethod to)
@@ -167,8 +170,7 @@ namespace Neo.Compiler.MSIL
             {
                 var call = from.body_Codes[next];
                 if (call.tokenMethod == "System.Numerics.BigInteger System.Numerics.BigInteger::op_Implicit(System.UInt64)")
-                {
-                    //如果是ulong转型到biginteger，需要注意
+                {//如果是ulong转型到biginteger，需要注意
                     ulong v = (ulong)i;
                     outv = v;
                     _ConvertPush(outv.ToByteArray(), src, to);
@@ -176,10 +178,13 @@ namespace Neo.Compiler.MSIL
                 }
             }
 
-            _ConvertPush(i, src, to);
-            return 0;
-        }
 
+            {
+                _ConvertPush(i, src, to);
+                return 0;
+            }
+
+        }
         private int _ConvertPushI4WithConv(ILMethod from, int i, OpCode src, NeoMethod to)
         {
             var next = from.GetNextCodeAddr(src.addr);
@@ -222,108 +227,85 @@ namespace Neo.Compiler.MSIL
                 _ConvertPush(i, src, to);
                 return 0;
             }
+
         }
-
-        private void _insertSharedStaticVarCode(NeoMethod to)
-        {
-            if (this.outModule.mapFields.Count > 255)
-                throw new Exception("too mush static fields");
-            //insert init constvalue part
-            byte count = (byte)this.outModule.mapFields.Count;
-            //INITSSLOT with a u8 len
-            if (count > 0)
-            {
-                _Insert1(VM.OpCode.INITSSLOT, "", to, new byte[] { count });
-            }
-            foreach (var defvar in this.outModule.staticfieldsWithConstValue)
-            {
-                if (this.outModule.mapFields.TryGetValue(defvar.Key, out NeoField field))
-                {
-                    //value
-                    #region insertValue
-                    //this static var had a default value.
-                    var _src = defvar.Value;
-                    if (_src is byte[])
-                    {
-                        var bytesrc = (byte[])_src;
-                        _ConvertPush(bytesrc, null, to);
-                    }
-                    else if (_src is int intsrc)
-                    {
-                        _ConvertPush(intsrc, null, to);
-                    }
-                    else if (_src is long longsrc)
-                    {
-                        _ConvertPush(longsrc, null, to);
-                    }
-                    else if (_src is bool bsrc)
-                    {
-                        _ConvertPush(bsrc ? 1 : 0, null, to);
-                    }
-                    else if (_src is string strsrc)
-                    {
-                        var bytesrc = Encoding.UTF8.GetBytes(strsrc);
-                        _ConvertPush(bytesrc, null, to);
-                    }
-                    else if (_src is BigInteger bisrc)
-                    {
-                        byte[] bytes = bisrc.ToByteArray();
-                        _ConvertPush(bytes, null, to);
-                    }
-                    else
-                    {
-                        //no need to init null
-                        _Convert1by1(VM.OpCode.PUSHNULL, null, to);
-                    }
-                    #endregion
-
-                    if (field.index < 7)
-                    {
-                        _Insert1(VM.OpCode.STSFLD0 + (byte)field.index, "", to);
-                    }
-                    else
-                    {
-                        var fieldIndex = (byte)field.index;
-                        _Insert1(VM.OpCode.STSFLD, "", to, new byte[] { fieldIndex });
-                    }
-                }
-            }
-
-            //insert code part
-            foreach (var cctor in this.outModule.staticfieldsCctor)
-            {
-                FillMethod(cctor, to, false);
-            }
-        }
-
         private void _insertBeginCode(ILMethod from, NeoMethod to)
         {
-            if (from.paramtypes.Count > 255)
-                throw new Exception("too mush params in:" + from);
-            if (from.body_Variables.Count > 255)
-                throw new Exception("too mush local varibles in:" + from);
+            ////压入深度临时栈
+            //_Insert1(VM.OpCode.DEPTH, "record depth.", to);
+            //_Insert1(VM.OpCode.TOALTSTACK, "", to);
 
-            byte paramcount = (byte)from.paramtypes.Count;
-            byte varcount = (byte)from.body_Variables.Count;
-            if (paramcount + varcount > 0)
+            ////初始化临时槽位位置
+            //foreach (var src in from.body_Variables)
+            //{
+            //    to.body_Variables.Add(new ILParam(src.name, src.type));
+            //    _InsertPush(0, "body_Variables init", to);
+            //}
+
+            //新玩法，用一个数组，应该能减少指令数量
+            _InsertPush(from.paramtypes.Count + from.body_Variables.Count, "begincode", to);
+            _Insert1(VM.OpCode.NEWARRAY, "", to);
+            _Insert1(VM.OpCode.TOALTSTACK, "", to);
+            //移动参数槽位
+            for (var i = 0; i < from.paramtypes.Count; i++)
             {
-                _Insert1(VM.OpCode.INITSLOT, "begincode", to, new byte[] { varcount, paramcount });
+                //getarray
+                _Insert1(VM.OpCode.FROMALTSTACK, "set param:" + i, to);
+                _Insert1(VM.OpCode.DUP, null, to);
+                _Insert1(VM.OpCode.TOALTSTACK, null, to);
+
+                _InsertPush(i, "", to); //Array pos
+
+                _InsertPush(2, "", to); //Array item
+                _Insert1(VM.OpCode.ROLL, null, to);
+
+                _Insert1(VM.OpCode.SETITEM, null, to);
             }
         }
-        private void _insertBeginCodeEntry(NeoMethod to)
-        {
-            byte paramcount = (byte)2;
-            byte varcount = (byte)0;
-            _Insert1(VM.OpCode.INITSLOT, "begincode", to, new byte[] { varcount, paramcount });
-        }
 
-        private void _insertEndCode(NeoMethod to, OpCode src)
+        private void _insertEndCode(ILMethod from, NeoMethod to, OpCode src)
         {
-            //no need to clear altstack.
+            ////占位不谢
+            _Convert1by1(VM.OpCode.NOP, src, to);
 
-            ////移除深度临时栈
-            //_Insert1(VM.OpCode.FROMALTSTACK, "endcode", to);
-            //_Insert1(VM.OpCode.DROP, "", to);
+            ////移除临时槽位
+            ////drop body_Variables
+            //for (var i = 0; i < from.body_Variables.Count; i++)
+            //{
+            //    _Insert1(VM.OpCode.DEPTH, "body_Variables drop", to, null);
+            //    _Insert1(VM.OpCode.DEC, null, to, null);
+
+            //    //push olddepth
+            //    _Insert1(VM.OpCode.FROMALTSTACK, null, to);
+            //    _Insert1(VM.OpCode.DUP, null, to);
+            //    _Insert1(VM.OpCode.TOALTSTACK, null, to);
+            //    //(d-1)-olddepth
+            //    _Insert1(VM.OpCode.SUB, null, to);
+
+            //    _Insert1(VM.OpCode.XDROP, null, to, null);
+            //}
+            ////移除参数槽位
+            //for (var i = 0; i < from.paramtypes.Count; i++)
+            //{
+            //    //d
+            //    _Insert1(VM.OpCode.DEPTH, "param drop", to, null);
+
+            //    //push olddepth
+            //    _Insert1(VM.OpCode.FROMALTSTACK, null, to);
+            //    _Insert1(VM.OpCode.DUP, null, to);
+            //    _Insert1(VM.OpCode.DEC, null, to);//深度-1
+            //    _Insert1(VM.OpCode.TOALTSTACK, null, to);
+
+            //    //(d)-olddepth
+            //    _Insert1(VM.OpCode.SUB, null, to);
+
+            //    _Insert1(VM.OpCode.XDROP, null, to, null);
+
+            //}
+
+            //移除深度临时栈
+            _Insert1(VM.OpCode.FROMALTSTACK, "endcode", to);
+            _Insert1(VM.OpCode.DROP, "", to);
         }
     }
 }

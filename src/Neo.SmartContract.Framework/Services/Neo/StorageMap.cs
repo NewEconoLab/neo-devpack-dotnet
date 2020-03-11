@@ -1,8 +1,8 @@
-namespace Neo.SmartContract.Framework.Services.Neo
+﻿namespace Neo.SmartContract.Framework.Services.Neo
 {
     public class StorageMap
     {
         internal StorageContext Context;
-        internal byte[] Prefix;
+        internal string Prefix;
     }
 }

@@ -1,31 +1,35 @@
-using System.Numerics;
-
-namespace Neo.SmartContract.Framework.Services.Neo
+﻿namespace Neo.SmartContract.Framework.Services.Neo
 {
     public static class Blockchain
     {
-        [Syscall("System.Blockchain.GetHeight")]
+        [Syscall("Neo.Blockchain.GetHeight")]
         public static extern uint GetHeight();
 
-        [Syscall("System.Blockchain.GetBlock")]
+        [Syscall("Neo.Blockchain.GetHeader")]
+        public static extern Header GetHeader(uint height);
+
+        [Syscall("Neo.Blockchain.GetHeader")]
+        public static extern Header GetHeader(byte[] hash);
+
+        [Syscall("Neo.Blockchain.GetBlock")]
         public static extern Block GetBlock(uint height);
 
-        [Syscall("System.Blockchain.GetBlock")]
+        [Syscall("Neo.Blockchain.GetBlock")]
         public static extern Block GetBlock(byte[] hash);
 
-        [Syscall("System.Blockchain.GetTransaction")]
+        [Syscall("Neo.Blockchain.GetTransaction")]
         public static extern Transaction GetTransaction(byte[] hash);
 
-        [Syscall("System.Blockchain.GetTransactionFromBlock")]
-        public static extern Transaction GetTransactionFromBlock(byte[] blockHash, int txIndex);
+        [Syscall("Neo.Blockchain.GetAccount")]
+        public static extern Account GetAccount(byte[] script_hash);
 
-        [Syscall("System.Blockchain.GetTransactionFromBlock")]
-        public static extern Transaction GetTransactionFromBlock(uint blockIndex, int txIndex);
+        [Syscall("Neo.Blockchain.GetValidators")]
+        public static extern byte[][] GetValidators();
 
-        [Syscall("System.Blockchain.GetTransactionHeight")]
-        public static extern BigInteger GetTransactionHeight(byte[] hash);
+        [Syscall("Neo.Blockchain.GetAsset")]
+        public static extern Asset GetAsset(byte[] asset_id);
 
-        [Syscall("System.Blockchain.GetContract")]
+        [Syscall("Neo.Blockchain.GetContract")]
         public static extern Contract GetContract(byte[] script_hash);
     }
 }

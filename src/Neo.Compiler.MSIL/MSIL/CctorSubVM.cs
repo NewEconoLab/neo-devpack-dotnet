@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -38,9 +38,18 @@ namespace Neo.Compiler.MSIL
             }
         }
 
-        public static bool Parse(ILMethod from, NeoModule to)
+        public static byte[] HexString2Bytes(string str)
         {
-            bool constValue = true;
+            byte[] outd = new byte[str.Length / 2];
+            for (var i = 0; i < str.Length / 2; i++)
+            {
+                outd[i] = byte.Parse(str.Substring(i * 2, 2), System.Globalization.NumberStyles.HexNumber);
+            }
+            return outd;
+        }
+
+        public static void Parse(ILMethod from, NeoModule to)
+        {
             calcStack = new Stack<object>();
             bool bEnd = false;
             foreach (var src in from.body_Codes.Values)
@@ -101,9 +110,7 @@ namespace Neo.Compiler.MSIL
                             }
                             else
                             {
-                                //other type mean is not a constValue
-                                constValue = false;
-                                continue;
+                                throw new Exception("only byte[] can be defined in here.");
                             }
                         }
                         break;
@@ -186,7 +193,8 @@ namespace Neo.Compiler.MSIL
                                         }
                                         else if (attrname == "HexToBytes")//HexString2Bytes to bytes[]
                                         {
-                                            var hex = text.HexString2Bytes();
+                                            if (text.IndexOf("0x") == 0) text = text.Substring(2);
+                                            var hex = HexString2Bytes(text);
                                             calcStack.Push(hex);
                                         }
                                         else if (attrname == "ToBigInteger")
@@ -202,17 +210,8 @@ namespace Neo.Compiler.MSIL
                     case CodeEx.Stsfld:
                         {
                             var field = src.tokenUnknown as Mono.Cecil.FieldReference;
-                            var fname = field.FullName;
-                            if (calcStack.Count == 0)
-                            {
-                                constValue = false;
-                                to.staticfieldsWithConstValue[fname] = null;
-                            }
-                            else
-                            {
-                                to.staticfieldsWithConstValue[fname] = calcStack.Pop();
-                            }
-                            // field.DeclaringType.FullName + "::" + field.Name;
+                            var fname = field.DeclaringType.FullName + "::" + field.Name;
+                            to.staticfields[fname] = calcStack.Pop();
                         }
                         break;
                     case CodeEx.Stelem_I1:
@@ -223,17 +222,8 @@ namespace Neo.Compiler.MSIL
                             array[index] = v;
                         }
                         break;
-                    default:
-                        break;
                 }
             }
-            if (constValue == false)
-            {
-                if (to.staticfieldsCctor.Contains(from) == false)
-                    to.staticfieldsCctor.Add(from);
-            }
-
-            return constValue;
         }
     }
 }

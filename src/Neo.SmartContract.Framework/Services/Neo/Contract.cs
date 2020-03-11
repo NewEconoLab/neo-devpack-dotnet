@@ -1,35 +1,32 @@
-namespace Neo.SmartContract.Framework.Services.Neo
+﻿namespace Neo.SmartContract.Framework.Services.Neo
 {
     public class Contract
     {
-        /// <summary>
-        /// Script
-        /// </summary>
-        public readonly byte[] Script;
+        public extern byte[] Script
+        {
+            [Syscall("Neo.Contract.GetScript")]
+            get;
+        }
 
-        /// <summary>
-        /// Has storage
-        /// </summary>
-        public readonly bool HasStorage;
+        public extern bool IsPayable
+        {
+            [Syscall("Neo.Contract.IsPayable")]
+            get;
+        }
 
-        /// <summary>
-        /// Is payable
-        /// </summary>
-        public readonly bool IsPayable;
+        public extern StorageContext StorageContext
+        {
+            [Syscall("Neo.Contract.GetStorageContext")]
+            get;
+        }
 
-        [Syscall("System.Contract.Call")]
-        public static extern object Call(byte[] scriptHash, string method, object[] arguments);
+        [Syscall("Neo.Contract.Create")]
+        public static extern Contract Create(byte[] script, byte[] parameter_list, byte return_type, ContractPropertyState contract_property_state, string name, string version, string author, string email, string description);
 
-        [Syscall("System.Contract.CallEx")]
-        public static extern object CallEx(byte[] scriptHash, string method, object[] arguments, CallFlags flag);
+        [Syscall("Neo.Contract.Migrate")]
+        public static extern Contract Migrate(byte[] script, byte[] parameter_list, byte return_type, ContractPropertyState contract_property_state, string name, string version, string author, string email, string description);
 
-        [Syscall("System.Contract.Create")]
-        public static extern Contract Create(byte[] script, string manifest);
-
-        [Syscall("System.Contract.Update")]
-        public static extern void Update(byte[] script, string manifest);
-
-        [Syscall("System.Contract.Destroy")]
+        [Syscall("Neo.Contract.Destroy")]
         public static extern void Destroy();
     }
 }

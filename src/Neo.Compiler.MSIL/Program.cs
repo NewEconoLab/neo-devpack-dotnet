@@ -1,9 +1,7 @@
 using Neo.Compiler.MSIL;
-using Neo.SmartContract;
-using Neo.SmartContract.Manifest;
 using System;
 using System.IO;
-using System.Linq;
+using System.IO.Compression;
 using System.Reflection;
 using System.Text;
 
@@ -32,16 +30,48 @@ namespace Neo.Compiler
                 log.Log("Examples: ");
                 log.Log("  neon mySmartContract.dll");
                 log.Log("  neon mySmartContract.csproj");
+
                 return -1;
             }
 
-            var fileInfo = new FileInfo(args[0]);
+            bool bCompatible = false;
+            FileInfo fileInfo = null;
+            for (var i = 0; i < args.Length; i++)
+            {
+                if (args[i][0] == '-')
+                {
+                    if (args[i] == "--compatible")
+                    {
+                        bCompatible = true;
+                    }
+
+                    // Other option
+                }
+                else
+                {
+                    fileInfo = new FileInfo(args[i]);
+                }
+            }
+
+            if (fileInfo == null)
+            {
+                log.Log("Need one param for filename (DLL or source)");
+                log.Log("[--compatible] disable nep8 function and disable SyscallInteropHash");
+                log.Log("Example:neon abc.dll --compatible");
+                return 0;
+            }
 
             // Set current directory
+
             if (!fileInfo.Exists)
             {
                 log.Log("Could not find file " + fileInfo.FullName);
                 return -1;
+            }
+
+            if (bCompatible)
+            {
+                log.Log("use --compatible no nep8 and no SyscallInteropHash");
             }
 
             Stream fs;
@@ -139,6 +169,7 @@ namespace Neo.Compiler
             ILModule mod = new ILModule(log);
 
             // Load module
+
             try
             {
                 mod.LoadModule(fs, fspdb);
@@ -148,23 +179,28 @@ namespace Neo.Compiler
                 log.Log("LoadModule Error:" + err.ToString());
                 return -1;
             }
-            byte[] bytes;
-            int bSucc = 0;
-            string jsonstr = null;
-            NeoModule module = null;
 
+            byte[] bytes;
+            bool bSucc;
+            string jsonstr = null;
             // Convert and build
+            string debugstr = null;
+            NeoModule am;
             try
             {
                 var conv = new ModuleConverter(log);
-                ConvOption option = new ConvOption();
-                module = conv.Convert(mod, option);
-                bytes = module.Build();
+                ConvOption option = new ConvOption
+                {
+                    useNep8 = !bCompatible,
+                    useSysCallInteropHash = !bCompatible
+                };
+                am = conv.Convert(mod, option);
+                bytes = am.Build();
                 log.Log("convert succ");
 
                 try
                 {
-                    var outjson = vmtool.FuncExport.Export(module, bytes);
+                    var outjson = vmtool.FuncExport.Export(am, bytes);
                     StringBuilder sb = new StringBuilder();
                     outjson.ConvertToStringWithFormat(sb, 0);
                     jsonstr = sb.ToString();
@@ -175,6 +211,18 @@ namespace Neo.Compiler
                     log.Log("gen abi Error:" + err.ToString());
                 }
 
+                try
+                {
+                    var outjson = DebugExport.Export(am);
+                    StringBuilder sb = new StringBuilder();
+                    outjson.ConvertToString(sb);
+                    debugstr = sb.ToString();
+                    log.Log("gen debug succ");
+                }
+                catch (Exception err)
+                {
+                    log.Log("gen debug Error:" + err.ToString());
+                }
             }
             catch (Exception err)
             {
@@ -186,25 +234,13 @@ namespace Neo.Compiler
 
             try
             {
-                string bytesname = onlyname + ".nef";
-                var nef = new NefFile
-                {
-                    Compiler = "neon",
-                    Version = Version.Parse(((AssemblyFileVersionAttribute)Assembly.GetExecutingAssembly()
-                        .GetCustomAttribute(typeof(AssemblyFileVersionAttribute))).Version),
-                    Script = bytes,
-                    ScriptHash = bytes.ToScriptHash()
-                };
-                nef.CheckSum = NefFile.ComputeChecksum(nef);
+
+                string bytesname = onlyname + ".avm";
 
                 File.Delete(bytesname);
-                using (var stream = File.OpenWrite(bytesname))
-                using (var writer = new BinaryWriter(stream))
-                {
-                    nef.Serialize(writer);
-                }
+                File.WriteAllBytes(bytesname, bytes);
                 log.Log("write:" + bytesname);
-                bSucc++;
+                bSucc = true;
             }
             catch (Exception err)
             {
@@ -219,7 +255,7 @@ namespace Neo.Compiler
                 File.Delete(abiname);
                 File.WriteAllText(abiname, jsonstr);
                 log.Log("write:" + abiname);
-                bSucc++;
+                bSucc = true;
             }
             catch (Exception err)
             {
@@ -229,28 +265,25 @@ namespace Neo.Compiler
 
             try
             {
-                var features = module == null ? ContractFeatures.NoProperty : module.attributes
-                    .Where(u => u.AttributeType.Name == "FeaturesAttribute")
-                    .Select(u => (ContractFeatures)u.ConstructorArguments.FirstOrDefault().Value)
-                    .FirstOrDefault();
+                string debugname = onlyname + ".debug.json";
+                string debugzip = onlyname + ".avmdbgnfo";
 
-                var storage = features.HasFlag(ContractFeatures.HasStorage).ToString().ToLowerInvariant();
-                var payable = features.HasFlag(ContractFeatures.Payable).ToString().ToLowerInvariant();
+                var tempName = Path.GetTempFileName();
+                File.Delete(tempName);
+                File.WriteAllText(tempName, debugstr);
 
-                string manifest = onlyname + ".manifest.json";
-                string defManifest =
-                    @"{""groups"":[],""features"":{""storage"":" + storage + @",""payable"":" + payable + @"},""abi"":" +
-                    jsonstr +
-                    @",""permissions"":[{""contract"":""*"",""methods"":""*""}],""trusts"":[],""safeMethods"":[]}";
-
-                File.Delete(manifest);
-                File.WriteAllText(manifest, defManifest);
-                log.Log("write:" + manifest);
-                bSucc++;
+                File.Delete(debugzip);
+                using (var archive = ZipFile.Open(debugzip, ZipArchiveMode.Create))
+                {
+                    archive.CreateEntryFromFile(tempName, Path.GetFileName(debugname));
+                }
+                File.Delete(tempName);
+                log.Log("write:" + debugzip);
+                bSucc = true;
             }
             catch (Exception err)
             {
-                log.Log("Write manifest Error:" + err.ToString());
+                log.Log("Write debug Error:" + err.ToString());
                 return -1;
             }
 
@@ -265,9 +298,9 @@ namespace Neo.Compiler
 
             }
 
-            if (bSucc == 3)
+            if (bSucc)
             {
-                Debug.DebugOutput(path,module, bytes, onlyname);
+                Debug.DebugOutput(path, am, bytes, onlyname);
                 log.Log("SUCC");
                 return 0;
             }

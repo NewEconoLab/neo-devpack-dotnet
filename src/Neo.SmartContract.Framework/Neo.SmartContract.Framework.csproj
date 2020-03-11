@@ -1,12 +1,11 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <Copyright>2016-2019 The Neo Project</Copyright>
+    <Copyright>2016-2017 The Neo Project</Copyright>
     <AssemblyTitle>Neo.SmartContract.Framework</AssemblyTitle>
-    <VersionPrefix>3.0.0</VersionPrefix>
-    <VersionSuffix>preview1</VersionSuffix>
+    <Version>2.10</Version>
     <Authors>The Neo Project</Authors>
-    <TargetFramework>netstandard2.1</TargetFramework>
+    <TargetFrameworks>netstandard1.6;net40</TargetFrameworks>
     <AssemblyName>Neo.SmartContract.Framework</AssemblyName>
     <PackageId>Neo.SmartContract.Framework</PackageId>
     <PackageTags>NEO;AntShares;Blockchain;Smart Contract;VM</PackageTags>
@@ -14,8 +13,26 @@
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <RepositoryType>git</RepositoryType>
     <RepositoryUrl>https://github.com/neo-project/neo-devpack-dotnet.git</RepositoryUrl>
+    <NetStandardImplicitPackageVersion Condition=" '$(TargetFramework)' == 'netstandard1.6' ">1.6.0</NetStandardImplicitPackageVersion>
     <Company>The Neo Project</Company>
     <Description>Neo.SmartContract.Framework</Description>
+    <PackageIcon>neo-logo-72.png</PackageIcon>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
   </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)|$(TargetFramework)|$(Platform)'=='Release|netstandard1.6|AnyCPU'">
+    <DefineConstants>RELEASE;NETSTANDARD1_6</DefineConstants>
+    <DebugType>none</DebugType>
+    <DebugSymbols>False</DebugSymbols>
+  </PropertyGroup>
+
+  <ItemGroup Condition=" '$(TargetFramework)' == 'net40' ">
+    <Reference Include="System" />
+    <Reference Include="Microsoft.CSharp" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="../neo-logo-72.png" Pack="true" Visible="false" PackagePath="" />
+  </ItemGroup>
 
 </Project>
