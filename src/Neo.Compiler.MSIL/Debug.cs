@@ -32,6 +32,14 @@ namespace Neo.Compiler
                     {
                         if (c.Value.debugline > 0)
                         {
+                            infos.AddArrayValue(m.Value.funcaddr.ToString("X04") + "-" + (c.Value.debugline - 2).ToString());
+                            break;
+                        }
+                    }
+                    foreach (var c in m.Value.body_Codes)
+                    {
+                        if (c.Value.debugline > 0)
+                        {
                             infos.AddArrayValue(c.Value.addr.ToString("X04") + "-" + c.Value.debugline.ToString());
                         }
                     }

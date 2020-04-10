@@ -212,7 +212,6 @@ namespace Neo.Compiler.MSIL
         {
             this.type = type;
             this.method = method;
-
             if (method != null)
             {
                 returntype = method.ReturnType.FullName;
